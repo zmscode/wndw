@@ -110,17 +110,49 @@ pub const Window = struct {
     }
 
     pub fn setFlags(self: Window, options: FlagOptions) void {
-        var flags: u32 = @as(u32, @intCast(c.RGFW_window_getFlags(self.handle)));
+        if (options.border) |enabled| {
+            c.RGFW_window_setBorder(self.handle, fromBool(enabled));
+            if (!enabled) {
+                // Some platforms need explicit refocus after border style changes.
+                c.RGFW_window_focus(self.handle);
+            }
+        }
+
+        if (options.resizable) |enabled| {
+            if (enabled) {
+                c.RGFW_window_setMinSize(self.handle, 0, 0);
+                c.RGFW_window_setMaxSize(self.handle, 0, 0);
+            } else {
+                var w: i32 = 0;
+                var h: i32 = 0;
+                _ = c.RGFW_window_getSize(self.handle, &w, &h);
+                c.RGFW_window_setMinSize(self.handle, w, h);
+                c.RGFW_window_setMaxSize(self.handle, w, h);
+            }
+        }
+
+        if (options.fullscreen) |enabled| {
+            c.RGFW_window_setFullscreen(self.handle, fromBool(enabled));
+        }
+
+        if (options.floating) |enabled| {
+            c.RGFW_window_setFloating(self.handle, fromBool(enabled));
+        }
+
+        if (options.hidden) |enabled| {
+            if (enabled) {
+                c.RGFW_window_hide(self.handle);
+            } else {
+                c.RGFW_window_show(self.handle);
+            }
+        }
 
         const centered = options.centered orelse options.centred;
-        if (centered) |enabled| setFlag(&flags, c.RGFW_windowCenter, enabled);
-        if (options.resizable) |enabled| setFlag(&flags, c.RGFW_windowNoResize, !enabled);
-        if (options.border) |enabled| setFlag(&flags, c.RGFW_windowNoBorder, !enabled);
-        if (options.fullscreen) |enabled| setFlag(&flags, c.RGFW_windowFullscreen, enabled);
-        if (options.floating) |enabled| setFlag(&flags, c.RGFW_windowFloating, enabled);
-        if (options.hidden) |enabled| setFlag(&flags, c.RGFW_windowHide, enabled);
-
-        c.RGFW_window_setFlags(self.handle, @as(c.RGFW_windowFlags, @intCast(flags)));
+        if (centered) |enabled| {
+            if (enabled) {
+                c.RGFW_window_center(self.handle);
+            }
+        }
     }
 };
 
@@ -135,15 +167,6 @@ pub fn init(title: [:0]const u8, width: i32, height: i32) Error!Window {
     ) orelse return error.RGFWCreateWindowFailed;
 
     return .{ .handle = window };
-}
-
-fn setFlag(flags: *u32, mask: anytype, enabled: bool) void {
-    const bit = @as(u32, @intCast(mask));
-    if (enabled) {
-        flags.* |= bit;
-    } else {
-        flags.* &= ~bit;
-    }
 }
 
 test "wrapper surface compiles" {
