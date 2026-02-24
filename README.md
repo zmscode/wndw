@@ -44,7 +44,25 @@ pub fn main() !void {
         .resizable = false,
     });
 
-    while (!window.shouldClose()) {}
+    while (!window.shouldClose()) {
+        window.poll();
+
+        if (window.isKeyPressed(wndw.key.escape)) {
+            window.setShouldClose(true);
+        }
+
+        if (window.isMousePressed(wndw.mouse.left)) {
+            const mouse_pos = window.mousePosition();
+            _ = mouse_pos;
+        }
+
+        var ev: wndw.c.RGFW_event = undefined;
+        while (window.pollEvent(&ev)) {
+            if (ev.type == wndw.c.RGFW_quit) {
+                window.setShouldClose(true);
+            }
+        }
+    }
 }
 ```
 
@@ -53,6 +71,18 @@ pub fn main() !void {
 - `-Drgfw_debug=true`
 - `-Drgfw_opengl=true`
 - `-Drgfw_native=true`
+
+## Event types
+
+`pollEvent` returns raw `wndw.c.RGFW_event` values with types such as:
+
+- `RGFW_keyPressed`, `RGFW_keyReleased`, `RGFW_keyChar`
+- `RGFW_mouseButtonPressed`, `RGFW_mouseButtonReleased`, `RGFW_mouseScroll`, `RGFW_mousePosChanged`
+- `RGFW_windowMoved`, `RGFW_windowResized`, `RGFW_windowRefresh`
+- `RGFW_focusIn`, `RGFW_focusOut`, `RGFW_mouseEnter`, `RGFW_mouseLeave`
+- `RGFW_quit`, `RGFW_dataDrop`, `RGFW_dataDrag`
+- `RGFW_windowMaximized`, `RGFW_windowMinimized`, `RGFW_windowRestored`
+- `RGFW_scaleUpdated`, `RGFW_monitorConnected`, `RGFW_monitorDisconnected`
 
 ## Local checks
 

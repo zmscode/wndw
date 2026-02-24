@@ -10,6 +10,28 @@ pub inline fn fromBool(value: bool) c.RGFW_bool {
     return if (value) c.RGFW_TRUE else c.RGFW_FALSE;
 }
 
+pub const Key = c.RGFW_key;
+pub const MouseButton = c.RGFW_mouseButton;
+
+pub const key = struct {
+    pub const escape: Key = c.RGFW_escape;
+    pub const space: Key = c.RGFW_space;
+    pub const w: Key = c.RGFW_w;
+    pub const a: Key = c.RGFW_a;
+    pub const s: Key = c.RGFW_s;
+    pub const d: Key = c.RGFW_d;
+    pub const up: Key = c.RGFW_up;
+    pub const down: Key = c.RGFW_down;
+    pub const left: Key = c.RGFW_left;
+    pub const right: Key = c.RGFW_right;
+};
+
+pub const mouse = struct {
+    pub const left: MouseButton = c.RGFW_mouseLeft;
+    pub const middle: MouseButton = c.RGFW_mouseMiddle;
+    pub const right: MouseButton = c.RGFW_mouseRight;
+};
+
 pub const Error = error{
     RGFWCreateWindowFailed,
 };
@@ -32,19 +54,55 @@ pub const Window = struct {
     }
 
     pub fn shouldClose(self: Window) bool {
-        self.pumpEvents();
-        return self.shouldCloseRaw();
-    }
-
-    pub fn shouldCloseRaw(self: Window) bool {
         return toBool(c.RGFW_window_shouldClose(self.handle));
     }
 
-    pub fn pumpEvents(self: Window) void {
-        var event: c.RGFW_event = undefined;
-        while (toBool(c.RGFW_window_checkEvent(self.handle, &event))) {
-            if (event.type == c.RGFW_quit) break;
-        }
+    pub fn setShouldClose(self: Window, should_close: bool) void {
+        c.RGFW_window_setShouldClose(self.handle, fromBool(should_close));
+    }
+
+    /// Poll platform events and update key/mouse state (raylib-style frame update).
+    pub fn poll(self: Window) void {
+        _ = self;
+        c.RGFW_setQueueEvents(c.RGFW_TRUE);
+        c.RGFW_pollEvents();
+    }
+
+    /// Pop the next event for this window.
+    pub fn pollEvent(self: Window, out: *c.RGFW_event) bool {
+        c.RGFW_setQueueEvents(c.RGFW_TRUE);
+        return toBool(c.RGFW_window_checkQueuedEvent(self.handle, out));
+    }
+
+    pub fn isKeyPressed(self: Window, k: Key) bool {
+        return toBool(c.RGFW_window_isKeyPressed(self.handle, k));
+    }
+
+    pub fn isKeyDown(self: Window, k: Key) bool {
+        return toBool(c.RGFW_window_isKeyDown(self.handle, k));
+    }
+
+    pub fn isKeyReleased(self: Window, k: Key) bool {
+        return toBool(c.RGFW_window_isKeyReleased(self.handle, k));
+    }
+
+    pub fn isMousePressed(self: Window, button: MouseButton) bool {
+        return toBool(c.RGFW_window_isMousePressed(self.handle, button));
+    }
+
+    pub fn isMouseDown(self: Window, button: MouseButton) bool {
+        return toBool(c.RGFW_window_isMouseDown(self.handle, button));
+    }
+
+    pub fn isMouseReleased(self: Window, button: MouseButton) bool {
+        return toBool(c.RGFW_window_isMouseReleased(self.handle, button));
+    }
+
+    pub fn mousePosition(self: Window) struct { x: i32, y: i32 } {
+        var x: i32 = 0;
+        var y: i32 = 0;
+        _ = c.RGFW_window_getMouse(self.handle, &x, &y);
+        return .{ .x = x, .y = y };
     }
 
     pub fn setFlags(self: Window, options: FlagOptions) void {
@@ -87,6 +145,8 @@ fn setFlag(flags: *u32, mask: anytype, enabled: bool) void {
 test "wrapper surface compiles" {
     _ = Window;
     _ = Error;
+    _ = key.escape;
+    _ = mouse.left;
     const options: Window.FlagOptions = .{
         .centred = true,
         .resizable = false,
