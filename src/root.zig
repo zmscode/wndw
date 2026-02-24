@@ -51,6 +51,41 @@ pub const Window = struct {
         fullscreen: ?bool = null,
         floating: ?bool = null,
         hidden: ?bool = null,
+        maximize: ?bool = null,
+        minimize: ?bool = null,
+        hide_mouse: ?bool = null,
+        focus_on_show: ?bool = null,
+        focus: ?bool = null,
+        transparent: ?bool = null,
+        allow_dnd: ?bool = null,
+
+        fn toFlags(opts: FlagOptions, current: c.RGFW_windowFlags) c.RGFW_windowFlags {
+            var flags = current;
+            const set = struct {
+                fn apply(f: *c.RGFW_windowFlags, bit: c.RGFW_windowFlags, val: ?bool) void {
+                    if (val) |v| {
+                        if (v) f.* |= bit else f.* &= ~bit;
+                    }
+                }
+            };
+            // border=true means no NoBorder flag, so invert
+            if (opts.border) |b| set.apply(&flags, c.RGFW_windowNoBorder, !b);
+            // resizable=false means NoResize flag, so invert
+            if (opts.resizable) |r| set.apply(&flags, c.RGFW_windowNoResize, !r);
+            set.apply(&flags, c.RGFW_windowFullscreen, opts.fullscreen);
+            set.apply(&flags, c.RGFW_windowFloating, opts.floating);
+            set.apply(&flags, c.RGFW_windowHide, opts.hidden);
+            set.apply(&flags, c.RGFW_windowMaximize, opts.maximize);
+            set.apply(&flags, c.RGFW_windowMinimize, opts.minimize);
+            set.apply(&flags, c.RGFW_windowHideMouse, opts.hide_mouse);
+            set.apply(&flags, c.RGFW_windowFocusOnShow, opts.focus_on_show);
+            set.apply(&flags, c.RGFW_windowFocus, opts.focus);
+            set.apply(&flags, c.RGFW_windowTransparent, opts.transparent);
+            set.apply(&flags, c.RGFW_windowAllowDND, opts.allow_dnd);
+            const centered_val = opts.centered orelse opts.centred;
+            set.apply(&flags, c.RGFW_windowCenter, centered_val);
+            return flags;
+        }
     };
 
     pub fn close(self: Window) void {
@@ -110,79 +145,18 @@ pub const Window = struct {
     }
 
     pub fn setFlags(self: Window, options: FlagOptions) void {
-        const currently_hidden = toBool(c.RGFW_window_isHidden(self.handle));
-        const style_change = options.border != null or
-            options.resizable != null or
-            options.fullscreen != null or
-            options.floating != null;
-
-        // Runtime style-mask mutations can be glitchy on some backends (notably macOS).
-        // Apply them while hidden, then show/focus again.
-        const hide_for_transition = style_change and !currently_hidden and options.hidden == null;
-        if (hide_for_transition) {
-            c.RGFW_window_hide(self.handle);
-        }
-
-        if (options.border) |enabled| {
-            c.RGFW_window_setBorder(self.handle, fromBool(enabled));
-        }
-
-        if (options.resizable) |enabled| {
-            if (enabled) {
-                c.RGFW_window_setMinSize(self.handle, 0, 0);
-                c.RGFW_window_setMaxSize(self.handle, 0, 0);
-            } else {
-                var w: i32 = 0;
-                var h: i32 = 0;
-                _ = c.RGFW_window_getSize(self.handle, &w, &h);
-                c.RGFW_window_setMinSize(self.handle, w, h);
-                c.RGFW_window_setMaxSize(self.handle, w, h);
-            }
-        }
-
-        if (options.fullscreen) |enabled| {
-            c.RGFW_window_setFullscreen(self.handle, fromBool(enabled));
-        }
-
-        if (options.floating) |enabled| {
-            c.RGFW_window_setFloating(self.handle, fromBool(enabled));
-        }
-
-        if (options.hidden) |enabled| {
-            if (enabled) {
-                c.RGFW_window_hide(self.handle);
-            } else {
-                c.RGFW_window_show(self.handle);
-            }
-        } else if (hide_for_transition) {
-            c.RGFW_window_show(self.handle);
-        }
-
-        const centered = options.centered orelse options.centred;
-        if (centered) |enabled| {
-            if (enabled) {
-                c.RGFW_window_center(self.handle);
-            }
-        }
-
-        if (!toBool(c.RGFW_window_isHidden(self.handle))) {
-            if (style_change) {
-                c.RGFW_window_show(self.handle);
-                c.RGFW_window_raise(self.handle);
-            }
-            c.RGFW_window_focus(self.handle);
-        }
+        c.RGFW_window_setFlags(self.handle, options.toFlags(self.handle.*.internal.flags));
     }
 };
 
-pub fn init(title: [:0]const u8, width: i32, height: i32) Error!Window {
+pub fn init(title: [:0]const u8, width: i32, height: i32, options: Window.FlagOptions) Error!Window {
     const window = c.RGFW_createWindow(
         title.ptr,
         0,
         0,
         width,
         height,
-        @as(c.RGFW_windowFlags, 0),
+        options.toFlags(0),
     ) orelse return error.RGFWCreateWindowFailed;
 
     return .{ .handle = window };
@@ -200,5 +174,8 @@ test "wrapper surface compiles" {
         .centred = true,
         .resizable = false,
     };
-    _ = options;
+    // Verify toFlags produces correct bitmask
+    const flags = options.toFlags(0);
+    const expected: c.RGFW_windowFlags = c.RGFW_windowCenter | c.RGFW_windowNoResize;
+    try @import("std").testing.expectEqual(expected, flags);
 }
