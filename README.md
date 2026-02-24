@@ -56,9 +56,9 @@ pub fn main() !void {
             _ = mouse_pos;
         }
 
-        var ev: wndw.c.RGFW_event = undefined;
+        var ev: wndw.Event = undefined;
         while (window.pollEvent(&ev)) {
-            if (ev.type == wndw.c.RGFW_quit) {
+            if (ev.type == wndw.quit) {
                 window.setShouldClose(true);
             }
         }
@@ -74,7 +74,7 @@ pub fn main() !void {
 
 ## Event types
 
-`pollEvent` returns raw `wndw.c.RGFW_event` values with types such as:
+`pollEvent` returns `wndw.Event` values with types such as:
 
 - `RGFW_keyPressed`, `RGFW_keyReleased`, `RGFW_keyChar`
 - `RGFW_mouseButtonPressed`, `RGFW_mouseButtonReleased`, `RGFW_mouseScroll`, `RGFW_mousePosChanged`

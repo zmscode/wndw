@@ -12,6 +12,10 @@ pub inline fn fromBool(value: bool) c.RGFW_bool {
 
 pub const Key = c.RGFW_key;
 pub const MouseButton = c.RGFW_mouseButton;
+pub const Event = c.RGFW_event;
+pub const EventType = c.RGFW_eventType;
+
+pub const quit: EventType = c.RGFW_quit;
 
 pub const key = struct {
     pub const escape: Key = c.RGFW_escape;
@@ -69,7 +73,7 @@ pub const Window = struct {
     }
 
     /// Pop the next event for this window.
-    pub fn pollEvent(self: Window, out: *c.RGFW_event) bool {
+    pub fn pollEvent(self: Window, out: *Event) bool {
         c.RGFW_setQueueEvents(c.RGFW_TRUE);
         return toBool(c.RGFW_window_checkQueuedEvent(self.handle, out));
     }
@@ -145,6 +149,9 @@ fn setFlag(flags: *u32, mask: anytype, enabled: bool) void {
 test "wrapper surface compiles" {
     _ = Window;
     _ = Error;
+    _ = Event;
+    _ = EventType;
+    _ = quit;
     _ = key.escape;
     _ = mouse.left;
     const options: Window.FlagOptions = .{
