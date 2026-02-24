@@ -110,12 +110,21 @@ pub const Window = struct {
     }
 
     pub fn setFlags(self: Window, options: FlagOptions) void {
+        const currently_hidden = toBool(c.RGFW_window_isHidden(self.handle));
+        const style_change = options.border != null or
+            options.resizable != null or
+            options.fullscreen != null or
+            options.floating != null;
+
+        // Runtime style-mask mutations can be glitchy on some backends (notably macOS).
+        // Apply them while hidden, then show/focus again.
+        const hide_for_transition = style_change and !currently_hidden and options.hidden == null;
+        if (hide_for_transition) {
+            c.RGFW_window_hide(self.handle);
+        }
+
         if (options.border) |enabled| {
             c.RGFW_window_setBorder(self.handle, fromBool(enabled));
-            if (!enabled) {
-                // Some platforms need explicit refocus after border style changes.
-                c.RGFW_window_focus(self.handle);
-            }
         }
 
         if (options.resizable) |enabled| {
@@ -145,6 +154,8 @@ pub const Window = struct {
             } else {
                 c.RGFW_window_show(self.handle);
             }
+        } else if (hide_for_transition) {
+            c.RGFW_window_show(self.handle);
         }
 
         const centered = options.centered orelse options.centred;
@@ -152,6 +163,10 @@ pub const Window = struct {
             if (enabled) {
                 c.RGFW_window_center(self.handle);
             }
+        }
+
+        if (!toBool(c.RGFW_window_isHidden(self.handle))) {
+            c.RGFW_window_focus(self.handle);
         }
     }
 };
