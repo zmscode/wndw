@@ -166,6 +166,10 @@ pub const Window = struct {
         }
 
         if (!toBool(c.RGFW_window_isHidden(self.handle))) {
+            if (style_change) {
+                c.RGFW_window_show(self.handle);
+                c.RGFW_window_raise(self.handle);
+            }
             c.RGFW_window_focus(self.handle);
         }
     }
