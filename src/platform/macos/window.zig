@@ -305,7 +305,7 @@ pub const Window = struct {
         objc.msgSend(void, pb, "clearContents", .{});
         const ns_str = objc.ns_string(text);
         const ns_str_type = objc.ns_string("public.utf8-plain-text");
-        objc.msgSend(objc.BOOL, pb, "setString:forType:", .{ ns_str, ns_str_type });
+        _ = objc.msgSend(objc.BOOL, pb, "setString:forType:", .{ ns_str, ns_str_type });
     }
 
     // ── Drag and drop ────────────────────────────────────────────────────
