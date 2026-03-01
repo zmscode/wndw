@@ -1,42 +1,40 @@
 const std = @import("std");
 
-const RgfwOptions = struct {
-    debug: bool,
-    opengl: bool,
-    native: bool,
-    vulkan: bool,
-    directx: bool,
-    webgpu: bool,
-};
-
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-
-    const rgfw_options = RgfwOptions{
-        .debug = b.option(bool, "rgfw_debug", "Enable RGFW debug logging") orelse false,
-        .opengl = b.option(bool, "rgfw_opengl", "Enable RGFW OpenGL API helpers") orelse false,
-        .native = b.option(bool, "rgfw_native", "Expose RGFW native backend structs in the bindings") orelse false,
-        .vulkan = b.option(bool, "rgfw_vulkan", "Enable RGFW Vulkan API helpers (requires Vulkan SDK)") orelse false,
-        .directx = b.option(bool, "rgfw_directx", "Enable RGFW DirectX API helpers (Windows only)") orelse false,
-        .webgpu = b.option(bool, "rgfw_webgpu", "Enable RGFW WebGPU API helpers") orelse false,
-    };
 
     const mod = b.addModule("wndw", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
-        .link_libc = true,
     });
 
-    const write_files = b.addWriteFiles();
-    const rgfw_impl = write_files.add("rgfw_impl.c",
-        \\#define RGFW_IMPLEMENTATION
-        \\#include "RGFW.h"
-    );
+    // ── Platform linking ──────────────────────────────────────────────────────
+    // No C source files — pure extern fn declarations only.
+    // Adding a new platform = one new branch here.
+    switch (target.result.os.tag) {
+        .macos => {
+            // Cocoa bundles libobjc; linking it is sufficient for the ObjC
+            // runtime + AppKit symbols used in src/platform/macos/.
+            // addSystemFrameworkPath is linker-only — it does NOT add the SDK
+            // path to any C compiler include path (there are no C files here),
+            // so the libDER/DERItem.h error that affected the RGFW build cannot
+            // occur.
+            if (b.sysroot == null) {
+                if (macOSSdkPath(b)) |sdk| {
+                    mod.addSystemFrameworkPath(.{ .cwd_relative = b.fmt("{s}/System/Library/Frameworks", .{sdk}) });
+                    mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/usr/lib", .{sdk}) });
+                }
+            }
+            mod.linkFramework("Cocoa", .{});
+        },
+        // .windows => { mod.linkSystemLibrary("user32", .{}); ... },
+        // .linux   => { mod.linkSystemLibrary("X11", .{}); ... },
+        else => {},
+    }
 
-    configureRgfw(b, mod, target, rgfw_options, rgfw_impl);
-
+    // ── Library artifact ──────────────────────────────────────────────────────
     const lib = b.addLibrary(.{
         .name = "wndw",
         .linkage = .static,
@@ -44,87 +42,55 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(lib);
 
-    const mod_tests = b.addTest(.{
-        .root_module = mod,
-    });
-    const run_mod_tests = b.addRunArtifact(mod_tests);
+    // ── Demo runner: `zig build run -- <name>` ────────────────────────────────
+    // Defaults to "demo" if no argument is provided.
+    const demo_name = if (b.args) |args|
+        if (args.len > 0) args[0] else "demo"
+    else
+        "demo";
 
-    const test_step = b.step("test", "Run tests");
-    test_step.dependOn(&run_mod_tests.step);
+    const demo_mod = b.createModule(.{
+        .root_source_file = b.path(b.fmt("{s}.zig", .{demo_name})),
+        .target = target,
+        .optimize = optimize,
+    });
+    demo_mod.addImport("wndw", mod);
+
+    const demo_exe = b.addExecutable(.{
+        .name = demo_name,
+        .root_module = demo_mod,
+    });
+
+    const run_cmd = b.addRunArtifact(demo_exe);
+    if (b.args) |args| {
+        if (args.len > 1) run_cmd.addArgs(args[1..]);
+    }
+
+    const run_step = b.step("run", "Run a demo (e.g. `zig build run -- demo`)");
+    run_step.dependOn(&run_cmd.step);
+
+    // ── Tests ─────────────────────────────────────────────────────────────────
+    const mod_tests = b.addTest(.{ .root_module = mod });
+    const run_tests = b.addRunArtifact(mod_tests);
+    const test_step = b.step("test", "Run unit tests");
+    test_step.dependOn(&run_tests.step);
+
+    // Unit tests — rooted at src/tests.zig so all src/tests/*.zig files share
+    // the src/ module root and can import siblings via relative "../" paths.
+    const unit_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/tests.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const unit_tests = b.addTest(.{ .root_module = unit_test_mod });
+    test_step.dependOn(&b.addRunArtifact(unit_tests).step);
 }
 
-fn configureRgfw(
-    b: *std.Build,
-    mod: *std.Build.Module,
-    target: std.Build.ResolvedTarget,
-    options: RgfwOptions,
-    implementation_file: std.Build.LazyPath,
-) void {
-    mod.addIncludePath(b.path("vendor/rgfw"));
-    mod.addCSourceFile(.{
-        .file = implementation_file,
-        .flags = &.{"-std=c99"},
-    });
-
-    if (options.debug) {
-        mod.addCMacro("RGFW_DEBUG", "1");
-    }
-    if (options.opengl) {
-        mod.addCMacro("RGFW_OPENGL", "1");
-    }
-    if (options.native) {
-        mod.addCMacro("RGFW_NATIVE", "1");
-    }
-    if (options.vulkan) {
-        mod.addCMacro("RGFW_VULKAN", "1");
-    }
-    if (options.directx) {
-        mod.addCMacro("RGFW_DIRECTX", "1");
-    }
-    if (options.webgpu) {
-        mod.addCMacro("RGFW_WEBGPU", "1");
-    }
-
-    switch (target.result.os.tag) {
-        .windows => {
-            mod.linkSystemLibrary("gdi32", .{});
-            mod.linkSystemLibrary("user32", .{});
-            mod.linkSystemLibrary("shell32", .{});
-            mod.linkSystemLibrary("advapi32", .{});
-            if (options.opengl) {
-                mod.linkSystemLibrary("opengl32", .{});
-            }
-            if (options.vulkan) {
-                mod.linkSystemLibrary("vulkan-1", .{});
-            }
-            if (options.directx) {
-                mod.linkSystemLibrary("dxgi", .{});
-            }
-        },
-        .macos => {
-            mod.linkFramework("Cocoa", .{});
-            mod.linkFramework("CoreVideo", .{});
-            mod.linkFramework("IOKit", .{});
-            if (options.opengl) {
-                mod.linkFramework("OpenGL", .{});
-            }
-            if (options.vulkan) {
-                mod.linkSystemLibrary("vulkan", .{});
-            }
-        },
-        .linux, .freebsd, .openbsd, .netbsd, .dragonfly, .illumos => {
-            mod.linkSystemLibrary("X11", .{});
-            mod.linkSystemLibrary("Xrandr", .{});
-            mod.linkSystemLibrary("dl", .{});
-            mod.linkSystemLibrary("pthread", .{});
-            mod.linkSystemLibrary("m", .{});
-            if (options.opengl) {
-                mod.linkSystemLibrary("GL", .{});
-            }
-            if (options.vulkan) {
-                mod.linkSystemLibrary("vulkan", .{});
-            }
-        },
-        else => {},
-    }
+/// Returns the macOS SDK root without relying on xcrun.
+/// Checks SDKROOT env var first, then falls back to the standard Xcode path.
+fn macOSSdkPath(b: *std.Build) ?[]const u8 {
+    if (b.graph.environ_map.get("SDKROOT")) |p| return p;
+    const default = "/Applications/Xcode.app/Contents/Developer/Platforms/" ++
+        "MacOSX.platform/Developer/SDKs/MacOSX.sdk";
+    return default;
 }
