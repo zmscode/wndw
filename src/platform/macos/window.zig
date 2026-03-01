@@ -366,7 +366,16 @@ pub const Window = struct {
     }
 
     pub fn minimize(win: *Window) void {
-        objc.msgSend(void, win.ns_window, "miniaturize:", .{@as(?objc.id, null)});
+        if (win.is_borderless) {
+            // Borderless windows lack NSWindowStyleMaskMiniaturizable — add it
+            // temporarily so miniaturize: works, then restore the mask.
+            const style = objc.msgSend(usize, win.ns_window, "styleMask", .{});
+            objc.msgSend(void, win.ns_window, "setStyleMask:", .{style | cocoa.NSWindowStyleMaskMiniaturizable});
+            objc.msgSend(void, win.ns_window, "miniaturize:", .{@as(?objc.id, null)});
+            objc.msgSend(void, win.ns_window, "setStyleMask:", .{style});
+        } else {
+            objc.msgSend(void, win.ns_window, "miniaturize:", .{@as(?objc.id, null)});
+        }
     }
 
     pub fn restore(win: *Window) void {
@@ -374,7 +383,19 @@ pub const Window = struct {
     }
 
     pub fn maximize(win: *Window) void {
-        objc.msgSend(void, win.ns_window, "zoom:", .{@as(?objc.id, null)});
+        if (win.is_borderless) {
+            // zoom: doesn't work reliably on borderless windows — use setFrame:
+            // to fill the current screen's visible area instead.
+            const screen = objc.msgSend(objc.id, win.ns_window, "screen", .{});
+            const FnRect = fn (objc.id, objc.SEL) callconv(.c) objc.NSRect;
+            const fn_rect: *const FnRect = @ptrCast(&objc.objc_msgSend);
+            const visible = fn_rect(screen, objc.sel_registerName("visibleFrame"));
+            const FnSetFrame = fn (objc.id, objc.SEL, objc.NSRect, objc.BOOL) callconv(.c) void;
+            const fn_set: *const FnSetFrame = @ptrCast(&objc.objc_msgSend);
+            fn_set(win.ns_window, objc.sel_registerName("setFrame:display:"), visible, objc.YES);
+        } else {
+            objc.msgSend(void, win.ns_window, "zoom:", .{@as(?objc.id, null)});
+        }
     }
 
     pub fn setFullscreen(win: *Window, enable: bool) void {

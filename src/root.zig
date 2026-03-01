@@ -17,8 +17,14 @@ const platform = switch (builtin.os.tag) {
 pub const Window      = platform.Window;
 pub const Event       = platform.Event;
 pub const Key         = platform.Key;
-pub const MouseButton = @import("event.zig").MouseButton;
-pub const Options     = platform.Options;
+pub const MouseButton  = @import("event.zig").MouseButton;
+pub const Cursor       = @import("event.zig").Cursor;
+pub const Modifiers    = @import("event.zig").Modifiers;
+pub const KeyEvent     = @import("event.zig").KeyEvent;
+pub const Position     = @import("event.zig").Position;
+pub const Size         = @import("event.zig").Size;
+pub const ScrollDelta  = @import("event.zig").ScrollDelta;
+pub const Options      = platform.Options;
 
 // ── Top-level API ─────────────────────────────────────────────────────────────
 

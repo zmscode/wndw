@@ -1,6 +1,24 @@
 const std = @import("std");
 const wndw = @import("wndw");
 
+// ── Callbacks (Phase 11) ────────────────────────────────────────────────────
+
+fn onResize(size: wndw.Size) void {
+    std.debug.print("[callback] resized: {}x{}\n", .{ size.w, size.h });
+}
+
+fn onFocusGained() void {
+    std.debug.print("[callback] focus gained\n", .{});
+}
+
+fn onFocusLost() void {
+    std.debug.print("[callback] focus lost\n", .{});
+}
+
+fn onCloseRequested() void {
+    std.debug.print("[callback] close requested\n", .{});
+}
+
 pub fn main() !void {
     var win = try wndw.init("wndw demo", 800, 600, .{
         .centred = true,
@@ -12,6 +30,12 @@ pub fn main() !void {
     win.setMinSize(400, 300);
     win.setMaxSize(1920, 1080);
 
+    // Register callbacks (Phase 11)
+    win.setOnResize(onResize);
+    win.setOnFocusGained(onFocusGained);
+    win.setOnFocusLost(onFocusLost);
+    win.setOnCloseRequested(onCloseRequested);
+
     // Monitor info
     const mon = win.getPrimaryMonitor();
     std.debug.print("primary monitor: {}x{} @ ({},{}) scale={d:.1}\n", .{ mon.w, mon.h, mon.x, mon.y, mon.scale });
@@ -20,20 +44,14 @@ pub fn main() !void {
     win.setDragAndDrop(true);
 
     std.debug.print("wndw demo running — press keys to interact:\n", .{});
-    std.debug.print("  escape  → quit\n", .{});
-    std.debug.print("  t       → change title\n", .{});
-    std.debug.print("  c       → center window\n", .{});
-    std.debug.print("  f       → toggle fullscreen\n", .{});
-    std.debug.print("  h       → hide cursor\n", .{});
-    std.debug.print("  s       → show cursor\n", .{});
-    std.debug.print("  o       → set 50% opacity\n", .{});
-    std.debug.print("  p       → restore full opacity\n", .{});
-    std.debug.print("  m       → minimize\n", .{});
-    std.debug.print("  x       → maximize\n", .{});
-    std.debug.print("  r       → read clipboard\n", .{});
-    std.debug.print("  w       → write to clipboard\n", .{});
-    std.debug.print("  i       → crosshair cursor\n", .{});
-    std.debug.print("  a       → reset cursor\n", .{});
+    std.debug.print("  escape  → quit          t → change title\n", .{});
+    std.debug.print("  c → center              f → toggle fullscreen\n", .{});
+    std.debug.print("  h → hide cursor         s → show cursor\n", .{});
+    std.debug.print("  o → 50%% opacity         p → full opacity\n", .{});
+    std.debug.print("  m → minimize            x → maximize\n", .{});
+    std.debug.print("  r → read clipboard      w → write clipboard\n", .{});
+    std.debug.print("  i → crosshair cursor    a → reset cursor\n", .{});
+    std.debug.print("  hold space → input state demo\n", .{});
 
     while (!win.shouldClose()) {
         while (win.poll()) |ev| {
@@ -97,6 +115,14 @@ pub fn main() !void {
                 .close_requested => win.quit(),
                 .refresh_requested => {},
             }
+        }
+
+        // Input state queries (Phase 10) — checked after all events are drained
+        if (win.isKeyDown(.space)) {
+            std.debug.print("[input state] space held down\n", .{});
+        }
+        if (win.isMouseDown(.left)) {
+            std.debug.print("[input state] left mouse held\n", .{});
         }
     }
 }
