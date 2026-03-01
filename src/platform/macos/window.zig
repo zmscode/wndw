@@ -87,8 +87,141 @@ pub const Window = struct {
     is_cursor_visible: bool = true,
     drop_count: u32 = 0,
     drop_paths: [MAX_DROP_FILES][*:0]const u8 = undefined,
+    input_state: InputState = .{},
+    callbacks: Callbacks = .{},
 
     const MAX_DROP_FILES = 64;
+
+    // ── Callbacks ─────────────────────────────────────────────────────────────
+
+    pub const Callbacks = struct {
+        on_key_press: ?*const fn (event.KeyEvent) void = null,
+        on_key_release: ?*const fn (event.KeyEvent) void = null,
+        on_mouse_press: ?*const fn (event.MouseButton) void = null,
+        on_mouse_release: ?*const fn (event.MouseButton) void = null,
+        on_mouse_move: ?*const fn (event.Position) void = null,
+        on_scroll: ?*const fn (event.ScrollDelta) void = null,
+        on_resize: ?*const fn (event.Size) void = null,
+        on_move: ?*const fn (event.Position) void = null,
+        on_focus_gained: ?*const fn () void = null,
+        on_focus_lost: ?*const fn () void = null,
+        on_close_requested: ?*const fn () void = null,
+    };
+
+    pub fn setOnKeyPress(win: *Window, cb: ?*const fn (event.KeyEvent) void) void {
+        win.callbacks.on_key_press = cb;
+    }
+
+    pub fn setOnKeyRelease(win: *Window, cb: ?*const fn (event.KeyEvent) void) void {
+        win.callbacks.on_key_release = cb;
+    }
+
+    pub fn setOnMousePress(win: *Window, cb: ?*const fn (event.MouseButton) void) void {
+        win.callbacks.on_mouse_press = cb;
+    }
+
+    pub fn setOnMouseRelease(win: *Window, cb: ?*const fn (event.MouseButton) void) void {
+        win.callbacks.on_mouse_release = cb;
+    }
+
+    pub fn setOnMouseMove(win: *Window, cb: ?*const fn (event.Position) void) void {
+        win.callbacks.on_mouse_move = cb;
+    }
+
+    pub fn setOnScroll(win: *Window, cb: ?*const fn (event.ScrollDelta) void) void {
+        win.callbacks.on_scroll = cb;
+    }
+
+    pub fn setOnResize(win: *Window, cb: ?*const fn (event.Size) void) void {
+        win.callbacks.on_resize = cb;
+    }
+
+    pub fn setOnMove(win: *Window, cb: ?*const fn (event.Position) void) void {
+        win.callbacks.on_move = cb;
+    }
+
+    pub fn setOnFocusGained(win: *Window, cb: ?*const fn () void) void {
+        win.callbacks.on_focus_gained = cb;
+    }
+
+    pub fn setOnFocusLost(win: *Window, cb: ?*const fn () void) void {
+        win.callbacks.on_focus_lost = cb;
+    }
+
+    pub fn setOnCloseRequested(win: *Window, cb: ?*const fn () void) void {
+        win.callbacks.on_close_requested = cb;
+    }
+
+    // ── InputState ────────────────────────────────────────────────────────────
+
+    pub const InputState = struct {
+        const KEY_WORDS = 3; // 3 × 64 = 192 bits, covers all Key variants
+        const MOUSE_BITS = 5; // 5 buttons
+
+        key_current: [KEY_WORDS]u64 = .{ 0, 0, 0 },
+        key_prev: [KEY_WORDS]u64 = .{ 0, 0, 0 },
+        mouse_current: u8 = 0,
+        mouse_prev: u8 = 0,
+
+        fn keyBit(key: event.Key) struct { word: usize, mask: u64 } {
+            const idx: usize = @intFromEnum(key);
+            return .{ .word = idx / 64, .mask = @as(u64, 1) << @intCast(idx % 64) };
+        }
+
+        fn mouseBit(btn: event.MouseButton) u8 {
+            return @as(u8, 1) << @intCast(@intFromEnum(btn));
+        }
+
+        pub fn handleKeyPress(self: *InputState, key: event.Key) void {
+            const b = keyBit(key);
+            self.key_current[b.word] |= b.mask;
+        }
+
+        pub fn handleKeyRelease(self: *InputState, key: event.Key) void {
+            const b = keyBit(key);
+            self.key_current[b.word] &= ~b.mask;
+        }
+
+        pub fn handleMousePress(self: *InputState, btn: event.MouseButton) void {
+            self.mouse_current |= mouseBit(btn);
+        }
+
+        pub fn handleMouseRelease(self: *InputState, btn: event.MouseButton) void {
+            self.mouse_current &= ~mouseBit(btn);
+        }
+
+        pub fn nextFrame(self: *InputState) void {
+            self.key_prev = self.key_current;
+            self.mouse_prev = self.mouse_current;
+        }
+
+        pub fn isKeyDown(self: *const InputState, key: event.Key) bool {
+            const b = keyBit(key);
+            return (self.key_current[b.word] & b.mask) != 0;
+        }
+
+        pub fn isKeyPressed(self: *const InputState, key: event.Key) bool {
+            const b = keyBit(key);
+            return (self.key_current[b.word] & b.mask) != 0 and (self.key_prev[b.word] & b.mask) == 0;
+        }
+
+        pub fn isKeyReleased(self: *const InputState, key: event.Key) bool {
+            const b = keyBit(key);
+            return (self.key_current[b.word] & b.mask) == 0 and (self.key_prev[b.word] & b.mask) != 0;
+        }
+
+        pub fn isMouseBtnDown(self: *const InputState, btn: event.MouseButton) bool {
+            return (self.mouse_current & mouseBit(btn)) != 0;
+        }
+
+        pub fn isMouseBtnPressed(self: *const InputState, btn: event.MouseButton) bool {
+            return (self.mouse_current & mouseBit(btn)) != 0 and (self.mouse_prev & mouseBit(btn)) == 0;
+        }
+
+        pub fn isMouseBtnReleased(self: *const InputState, btn: event.MouseButton) bool {
+            return (self.mouse_current & mouseBit(btn)) == 0 and (self.mouse_prev & mouseBit(btn)) != 0;
+        }
+    };
 
     pub fn close(win: *Window) void {
         // Nil delegate before destroying win to prevent callbacks after free.
@@ -108,9 +241,86 @@ pub const Window = struct {
 
     /// Return the next queued event, or null.
     /// Drains the OS event queue only when the Zig-side queue is empty.
+    /// Automatically updates input state (key/mouse bitsets) for each event.
     pub fn poll(win: *Window) ?Event {
-        if (win.queue.isEmpty()) drain_ns_events(win);
-        return win.queue.pop();
+        if (win.queue.isEmpty()) {
+            win.input_state.nextFrame();
+            drain_ns_events(win);
+        }
+        const ev = win.queue.pop() orelse return null;
+        win.dispatchEvent(ev);
+        return ev;
+    }
+
+    /// Update input state and fire callbacks for an event.
+    /// Called by poll() for each dequeued event. Also usable directly in tests.
+    pub fn dispatchEvent(win: *Window, ev: Event) void {
+        switch (ev) {
+            .key_pressed => |kp| {
+                win.input_state.handleKeyPress(kp.key);
+                if (win.callbacks.on_key_press) |cb| cb(kp);
+            },
+            .key_released => |kr| {
+                win.input_state.handleKeyRelease(kr.key);
+                if (win.callbacks.on_key_release) |cb| cb(kr);
+            },
+            .mouse_pressed => |btn| {
+                win.input_state.handleMousePress(btn);
+                if (win.callbacks.on_mouse_press) |cb| cb(btn);
+            },
+            .mouse_released => |btn| {
+                win.input_state.handleMouseRelease(btn);
+                if (win.callbacks.on_mouse_release) |cb| cb(btn);
+            },
+            .mouse_moved => |pos| {
+                if (win.callbacks.on_mouse_move) |cb| cb(pos);
+            },
+            .scroll => |s| {
+                if (win.callbacks.on_scroll) |cb| cb(s);
+            },
+            .resized => |r| {
+                if (win.callbacks.on_resize) |cb| cb(r);
+            },
+            .moved => |p| {
+                if (win.callbacks.on_move) |cb| cb(p);
+            },
+            .focus_gained => {
+                if (win.callbacks.on_focus_gained) |cb| cb();
+            },
+            .focus_lost => {
+                if (win.callbacks.on_focus_lost) |cb| cb();
+            },
+            .close_requested => {
+                if (win.callbacks.on_close_requested) |cb| cb();
+            },
+            else => {},
+        }
+    }
+
+    // ── Input state queries ───────────────────────────────────────────────────
+
+    pub fn isKeyDown(win: *const Window, key: event.Key) bool {
+        return win.input_state.isKeyDown(key);
+    }
+
+    pub fn isKeyPressed(win: *const Window, key: event.Key) bool {
+        return win.input_state.isKeyPressed(key);
+    }
+
+    pub fn isKeyReleased(win: *const Window, key: event.Key) bool {
+        return win.input_state.isKeyReleased(key);
+    }
+
+    pub fn isMouseDown(win: *const Window, btn: event.MouseButton) bool {
+        return win.input_state.isMouseBtnDown(btn);
+    }
+
+    pub fn isMousePressed(win: *const Window, btn: event.MouseButton) bool {
+        return win.input_state.isMouseBtnPressed(btn);
+    }
+
+    pub fn isMouseReleased(win: *const Window, btn: event.MouseButton) bool {
+        return win.input_state.isMouseBtnReleased(btn);
     }
 
     // ── State queries ──────────────────────────────────────────────────────────

@@ -172,6 +172,12 @@ pub const KeyEvent = struct {
     mods: Modifiers = .{},
 };
 
+// ── Payload types ─────────────────────────────────────────────────────────────
+
+pub const Position = struct { x: i32, y: i32 };
+pub const Size = struct { w: i32, h: i32 };
+pub const ScrollDelta = struct { dx: f32, dy: f32 };
+
 // ── Event ─────────────────────────────────────────────────────────────────────
 
 pub const Event = union(enum) {
@@ -179,10 +185,10 @@ pub const Event = union(enum) {
     key_released: KeyEvent,
     mouse_pressed: MouseButton,
     mouse_released: MouseButton,
-    mouse_moved: struct { x: i32, y: i32 },
-    scroll: struct { dx: f32, dy: f32 },
-    resized: struct { w: i32, h: i32 },
-    moved: struct { x: i32, y: i32 },
+    mouse_moved: Position,
+    scroll: ScrollDelta,
+    resized: Size,
+    moved: Position,
     focus_gained,
     focus_lost,
     close_requested,

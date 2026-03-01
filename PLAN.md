@@ -247,45 +247,59 @@ Create and manage an NSOpenGLContext. First graphics backend.
 
 ---
 
-## Phase 10 — Global Input State
+## Phase 10 — Global Input State ✅ DONE
 
 Frame-based input tracking: "is key currently held", "was key just pressed this frame".
 
-| # | Feature | Notes |
-|---|---------|-------|
-| 1 | `isKeyDown(Key) bool` | maintained bitset, set on press, cleared on release |
-| 2 | `isKeyPressed(Key) bool` | true only on the frame it was first pressed |
-| 3 | `isKeyReleased(Key) bool` | true only on the frame it was released |
-| 4 | `isMouseDown(MouseButton) bool` | same pattern for mouse |
-| 5 | `isMousePressed/Released` | |
-| 6 | `beginFrame()` or implicit in `poll()` | swap current/previous state buffers |
+| # | Feature | Notes | Status |
+|---|---------|-------|--------|
+| 1 | `isKeyDown(Key) bool` | maintained bitset, set on press, cleared on release | ✅ |
+| 2 | `isKeyPressed(Key) bool` | true only on the frame it was first pressed | ✅ |
+| 3 | `isKeyReleased(Key) bool` | true only on the frame it was released | ✅ |
+| 4 | `isMouseDown(MouseButton) bool` | same pattern for mouse | ✅ |
+| 5 | `isMousePressed/Released` | | ✅ |
+| 6 | Implicit in `poll()` | swap current/previous state buffers | ✅ |
 
-**TDD plan:**
-- Full logic tests: press → isDown, isPressed; next frame → isDown, !isPressed
-- Release → !isDown, isReleased; next frame → !isDown, !isReleased
-- No ObjC needed — pure struct logic, fully testable
+**Tests:** `src/tests/input_state_test.zig` — 16 tests covering InputState struct logic,
+key press/release/frame-advance semantics, mouse button state, multi-key independence.
 
-**Implementation notes:**
-- Key bitset: 140 keys → 3 × `u64` or `[3]u64` (current + previous frame)
-- Mouse bitset: 5 buttons → single `u8` pair
-- Frame boundary: either explicit `beginFrame()` or hook into first `poll()` per frame
+**Learnings:**
+- `InputState` uses 3 × `u64` bitset for keys (192 bits, covers all Key variants) + `u8` for mouse.
+- `isKeyPressed` = down now AND not down previous frame. `isKeyReleased` = up now AND down previous.
+- Frame boundary (`nextFrame()`) copies current → prev. Called at start of `poll()` drain cycle.
+- `poll()` updates input state via `dispatchEvent()` as each event is dequeued.
 
 ---
 
-## Phase 11 — Event Callbacks
+## Phase 11 — Event Callbacks ✅ DONE
 
 Optional callback alternative to polling.
 
-| # | Feature | Notes |
-|---|---------|-------|
-| 1 | `setOnKeyPress(fn)` | function pointer stored on Window |
-| 2 | `setOnMousePress(fn)` etc. | one setter per event type |
-| 3 | Callbacks fire during `poll()` | before event is queued |
+| # | Feature | Notes | Status |
+|---|---------|-------|--------|
+| 1 | `setOnKeyPress(fn)` | function pointer stored on Window | ✅ |
+| 2 | `setOnKeyRelease(fn)` | | ✅ |
+| 3 | `setOnMousePress(fn)` | | ✅ |
+| 4 | `setOnMouseRelease(fn)` | | ✅ |
+| 5 | `setOnMouseMove(fn)` | | ✅ |
+| 6 | `setOnScroll(fn)` | | ✅ |
+| 7 | `setOnResize(fn)` | | ✅ |
+| 8 | `setOnMove(fn)` | | ✅ |
+| 9 | `setOnFocusGained(fn)` | | ✅ |
+| 10 | `setOnFocusLost(fn)` | | ✅ |
+| 11 | `setOnCloseRequested(fn)` | | ✅ |
+| 12 | Callbacks fire during `poll()` | via `dispatchEvent()` | ✅ |
 
-**TDD plan:**
-- `@hasDecl` for setters
-- Callback invocation logic (set callback, push event, verify called)
-- Can test without ObjC by manually pushing events
+**Tests:** `src/tests/event_callbacks_test.zig` — 17 tests covering `@hasDecl` for all setters,
+callback field existence, callback invocation via `dispatchEvent()`, null safety.
+
+**Learnings:**
+- Extracted named payload types in `event.zig`: `Position`, `Size`, `ScrollDelta`. Anonymous
+  `struct { x: i32, y: i32 }` in different files are distinct types in Zig — named types fix this.
+- Extracted `dispatchEvent()` from `poll()` to enable pure-logic testing without ObjC linkage.
+  Tests call `dispatchEvent()` directly with constructed events.
+- `Callbacks` struct holds 11 optional fn pointers (one per event category). All default to `null`.
+- Callbacks fire *after* input state update, during the same `poll()` call that returns the event.
 
 ---
 
@@ -302,8 +316,8 @@ Optional callback alternative to polling.
 | 7. Drag and drop | Medium | ~3 callbacks | 3 new tags | No | **Done** |
 | 8. Monitor/display | Medium | ~8 calls | — | No | **Done** |
 | 9. OpenGL context | Hard | ~6 calls | — | No |
-| 10. Global input state | Medium | — | — | No |
-| 11. Event callbacks | Medium | — | — | No |
+| 10. Global input state | Medium | — | — | No | **Done** |
+| 11. Event callbacks | Medium | — | — | No | **Done** |
 
 ---
 
