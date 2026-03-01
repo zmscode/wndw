@@ -4,6 +4,9 @@ const RgfwOptions = struct {
     debug: bool,
     opengl: bool,
     native: bool,
+    vulkan: bool,
+    directx: bool,
+    webgpu: bool,
 };
 
 pub fn build(b: *std.Build) void {
@@ -14,6 +17,9 @@ pub fn build(b: *std.Build) void {
         .debug = b.option(bool, "rgfw_debug", "Enable RGFW debug logging") orelse false,
         .opengl = b.option(bool, "rgfw_opengl", "Enable RGFW OpenGL API helpers") orelse false,
         .native = b.option(bool, "rgfw_native", "Expose RGFW native backend structs in the bindings") orelse false,
+        .vulkan = b.option(bool, "rgfw_vulkan", "Enable RGFW Vulkan API helpers (requires Vulkan SDK)") orelse false,
+        .directx = b.option(bool, "rgfw_directx", "Enable RGFW DirectX API helpers (Windows only)") orelse false,
+        .webgpu = b.option(bool, "rgfw_webgpu", "Enable RGFW WebGPU API helpers") orelse false,
     };
 
     const mod = b.addModule("wndw", .{
@@ -69,6 +75,15 @@ fn configureRgfw(
     if (options.native) {
         mod.addCMacro("RGFW_NATIVE", "1");
     }
+    if (options.vulkan) {
+        mod.addCMacro("RGFW_VULKAN", "1");
+    }
+    if (options.directx) {
+        mod.addCMacro("RGFW_DIRECTX", "1");
+    }
+    if (options.webgpu) {
+        mod.addCMacro("RGFW_WEBGPU", "1");
+    }
 
     switch (target.result.os.tag) {
         .windows => {
@@ -79,6 +94,12 @@ fn configureRgfw(
             if (options.opengl) {
                 mod.linkSystemLibrary("opengl32", .{});
             }
+            if (options.vulkan) {
+                mod.linkSystemLibrary("vulkan-1", .{});
+            }
+            if (options.directx) {
+                mod.linkSystemLibrary("dxgi", .{});
+            }
         },
         .macos => {
             mod.linkFramework("Cocoa", .{});
@@ -86,6 +107,9 @@ fn configureRgfw(
             mod.linkFramework("IOKit", .{});
             if (options.opengl) {
                 mod.linkFramework("OpenGL", .{});
+            }
+            if (options.vulkan) {
+                mod.linkSystemLibrary("vulkan", .{});
             }
         },
         .linux, .freebsd, .openbsd, .netbsd, .dragonfly, .illumos => {
@@ -96,6 +120,9 @@ fn configureRgfw(
             mod.linkSystemLibrary("m", .{});
             if (options.opengl) {
                 mod.linkSystemLibrary("GL", .{});
+            }
+            if (options.vulkan) {
+                mod.linkSystemLibrary("vulkan", .{});
             }
         },
         else => {},

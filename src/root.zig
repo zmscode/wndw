@@ -29,6 +29,27 @@ pub const MouseButton = rgfw_h.RGFW_mouseButton;
 /// Tagged union describing a single input or window event.
 /// Access the active member by switching on `event.type` (an `EventType`).
 pub const Event = rgfw_h.RGFW_event;
+/// Common fields shared by all event types (type discriminator + window pointer).
+/// Access via `event.common`.
+pub const CommonEvent = rgfw_h.RGFW_commonEvent;
+/// Event data for mouse button press/release. Access via `event.button`.
+pub const MouseButtonEvent = rgfw_h.RGFW_mouseButtonEvent;
+/// Event data for mouse scroll. Access via `event.scroll`.
+pub const MouseScrollEvent = rgfw_h.RGFW_mouseScrollEvent;
+/// Event data for mouse position changes. Access via `event.mouse`.
+pub const MousePosEvent = rgfw_h.RGFW_mousePosEvent;
+/// Event data for key press/release. Access via `event.key`.
+pub const KeyEvent = rgfw_h.RGFW_keyEvent;
+/// Event data for Unicode character input. Access via `event.keyChar`.
+pub const KeyCharEvent = rgfw_h.RGFW_keyCharEvent;
+/// Event data for file drops. Access via `event.drop`.
+pub const DataDropEvent = rgfw_h.RGFW_dataDropEvent;
+/// Event data for file drags. Access via `event.drag`.
+pub const DataDragEvent = rgfw_h.RGFW_dataDragEvent;
+/// Event data for DPI/content scale changes. Access via `event.scale`.
+pub const ScaleUpdatedEvent = rgfw_h.RGFW_scaleUpdatedEvent;
+/// Event data for monitor connect/disconnect. Access via `event.monitor`.
+pub const MonitorEvent = rgfw_h.RGFW_monitorEvent;
 /// Discriminator for `Event`. Compare against `event_type.*` constants.
 pub const EventType = rgfw_h.RGFW_eventType;
 /// Bitmask of active key modifiers (shift, ctrl, alt, ...). Check with `keymod.*` constants.
@@ -65,6 +86,276 @@ pub const GammaRamp = rgfw_h.RGFW_gammaRamp;
 /// Opaque handle to a renderable pixel buffer for software rendering.
 /// Blit to a window with `Window.blitSurface`.
 pub const Surface = rgfw_h.RGFW_surface;
+
+// ──────────────────────────────────────────────
+// Window flag constants
+// ──────────────────────────────────────────────
+
+/// Raw window flag constants for flags not exposed through `Window.FlagOptions`.
+/// These can be combined with `|` and applied via the lower-level C API.
+///
+/// Most users should prefer `Window.FlagOptions`; these are for advanced use
+/// cases or composite flags that don't map to a single boolean toggle.
+pub const window_flag = struct {
+    /// Enable raw (unaccelerated) mouse input on window creation.
+    pub const raw_mouse: WindowFlags = rgfw_h.RGFW_windowRawMouse;
+    /// Automatically scale the window to match the monitor's content scale.
+    pub const scale_to_monitor: WindowFlags = rgfw_h.RGFW_windowScaleToMonitor;
+    /// Centre the mouse cursor in the window on creation.
+    pub const center_cursor: WindowFlags = rgfw_h.RGFW_windowCenterCursor;
+    /// Capture (confine) the mouse to the window on creation.
+    pub const capture_mouse: WindowFlags = rgfw_h.RGFW_windowCaptureMouse;
+    /// Automatically create an OpenGL context with the window.
+    pub const opengl: WindowFlags = rgfw_h.RGFW_windowOpenGL;
+    /// Automatically create an EGL context with the window.
+    pub const egl: WindowFlags = rgfw_h.RGFW_windowEGL;
+    /// Do not auto-deinit RGFW when the last window is closed.
+    pub const no_deinit_on_close: WindowFlags = rgfw_h.RGFW_noDeinitOnClose;
+    /// Composite: borderless + maximized (windowed fullscreen / borderless fullscreen).
+    pub const windowed_fullscreen: WindowFlags = rgfw_h.RGFW_windowedFullscreen;
+    /// Composite: capture mouse + raw mouse input.
+    pub const capture_raw_mouse: WindowFlags = rgfw_h.RGFW_windowCaptureRawMouse;
+};
+
+// ──────────────────────────────────────────────
+// Event wait constants
+// ──────────────────────────────────────────────
+
+/// Type for `waitForEvent` timeout values.
+pub const EventWait = rgfw_h.RGFW_eventWait;
+
+/// Named constants for `waitForEvent`.
+pub const event_wait = struct {
+    /// Do not wait — return immediately if no events are pending.
+    pub const no_wait: EventWait = rgfw_h.RGFW_eventNoWait;
+    /// Wait indefinitely until the next event arrives.
+    pub const next: EventWait = rgfw_h.RGFW_eventWaitNext;
+};
+
+// ──────────────────────────────────────────────
+// Debug types
+// ──────────────────────────────────────────────
+
+/// Severity level for debug messages emitted by RGFW.
+pub const DebugType = rgfw_h.RGFW_debugType;
+
+/// Named constants for `DebugType`.
+pub const debug_type = struct {
+    /// A fatal or unrecoverable error.
+    pub const @"error": DebugType = rgfw_h.RGFW_typeError;
+    /// A non-fatal issue that may indicate a problem.
+    pub const warning: DebugType = rgfw_h.RGFW_typeWarning;
+    /// Informational message (e.g. context created, window freed).
+    pub const info: DebugType = rgfw_h.RGFW_typeInfo;
+};
+
+// ──────────────────────────────────────────────
+// Error codes
+// ──────────────────────────────────────────────
+
+/// Machine-readable error/info/warning codes emitted alongside debug messages.
+pub const ErrorCode = rgfw_h.RGFW_errorCode;
+
+/// Named constants for `ErrorCode`. Covers errors, informational notices, and warnings.
+pub const error_code = struct {
+    // Errors
+    pub const no_error: ErrorCode = rgfw_h.RGFW_noError;
+    pub const out_of_memory: ErrorCode = rgfw_h.RGFW_errOutOfMemory;
+    pub const opengl_context: ErrorCode = rgfw_h.RGFW_errOpenGLContext;
+    pub const egl_context: ErrorCode = rgfw_h.RGFW_errEGLContext;
+    pub const wayland: ErrorCode = rgfw_h.RGFW_errWayland;
+    pub const x11: ErrorCode = rgfw_h.RGFW_errX11;
+    pub const directx_context: ErrorCode = rgfw_h.RGFW_errDirectXContext;
+    pub const iokit: ErrorCode = rgfw_h.RGFW_errIOKit;
+    pub const clipboard: ErrorCode = rgfw_h.RGFW_errClipboard;
+    pub const failed_func_load: ErrorCode = rgfw_h.RGFW_errFailedFuncLoad;
+    pub const buffer: ErrorCode = rgfw_h.RGFW_errBuffer;
+    pub const metal: ErrorCode = rgfw_h.RGFW_errMetal;
+    pub const platform: ErrorCode = rgfw_h.RGFW_errPlatform;
+    pub const event_queue: ErrorCode = rgfw_h.RGFW_errEventQueue;
+
+    // Informational
+    pub const info_window: ErrorCode = rgfw_h.RGFW_infoWindow;
+    pub const info_buffer: ErrorCode = rgfw_h.RGFW_infoBuffer;
+    pub const info_global: ErrorCode = rgfw_h.RGFW_infoGlobal;
+    pub const info_opengl: ErrorCode = rgfw_h.RGFW_infoOpenGL;
+
+    // Warnings
+    pub const warning_wayland: ErrorCode = rgfw_h.RGFW_warningWayland;
+    pub const warning_opengl: ErrorCode = rgfw_h.RGFW_warningOpenGL;
+};
+
+// ──────────────────────────────────────────────
+// Callback type aliases
+// ──────────────────────────────────────────────
+
+/// Callback for debug/error messages. Receives severity, error code, and a human-readable message.
+pub const DebugFunc = rgfw_h.RGFW_debugfunc;
+/// Callback fired when a window is moved. Receives the window and its new position.
+pub const WindowMovedFunc = rgfw_h.RGFW_windowMovedfunc;
+/// Callback fired when a window is resized. Receives the window and its new size.
+pub const WindowResizedFunc = rgfw_h.RGFW_windowResizedfunc;
+/// Callback fired when a window is restored from minimize/maximize. Receives position and size.
+pub const WindowRestoredFunc = rgfw_h.RGFW_windowRestoredfunc;
+/// Callback fired when a window is maximized. Receives position and size.
+pub const WindowMaximizedFunc = rgfw_h.RGFW_windowMaximizedfunc;
+/// Callback fired when a window is minimized.
+pub const WindowMinimizedFunc = rgfw_h.RGFW_windowMinimizedfunc;
+/// Callback fired when a window is requested to close.
+pub const WindowQuitFunc = rgfw_h.RGFW_windowQuitfunc;
+/// Callback fired when a window gains or loses focus.
+pub const FocusFunc = rgfw_h.RGFW_focusfunc;
+/// Callback fired when the mouse enters or leaves a window. Receives position and enter/leave status.
+pub const MouseNotifyFunc = rgfw_h.RGFW_mouseNotifyfunc;
+/// Callback fired when the mouse moves. Receives position and movement delta vector.
+pub const MousePosFunc = rgfw_h.RGFW_mousePosfunc;
+/// Callback fired when files are dragged over a window. Receives the drag position.
+pub const DataDragFunc = rgfw_h.RGFW_dataDragfunc;
+/// Callback fired when the window needs repainting.
+pub const WindowRefreshFunc = rgfw_h.RGFW_windowRefreshfunc;
+/// Callback fired when a Unicode character is typed. Receives the codepoint.
+pub const KeyCharFunc = rgfw_h.RGFW_keyCharfunc;
+/// Callback fired on key press/release. Receives key, modifiers, repeat flag, and pressed state.
+pub const KeyFunc = rgfw_h.RGFW_keyfunc;
+/// Callback fired on mouse button press/release. Receives the button and pressed state.
+pub const MouseButtonFunc = rgfw_h.RGFW_mouseButtonfunc;
+/// Callback fired on mouse scroll. Receives x and y scroll deltas.
+pub const MouseScrollFunc = rgfw_h.RGFW_mouseScrollfunc;
+/// Callback fired when files are dropped onto a window. Receives the file list and count.
+pub const DataDropFunc = rgfw_h.RGFW_dataDropfunc;
+/// Callback fired when the content scale factor changes (e.g. moving to a HiDPI display).
+pub const ScaleUpdatedFunc = rgfw_h.RGFW_scaleUpdatedfunc;
+/// Callback fired when a monitor is connected or disconnected.
+pub const MonitorFunc = rgfw_h.RGFW_monitorfunc;
+
+// ──────────────────────────────────────────────
+// Callback registration
+// ──────────────────────────────────────────────
+
+/// Global callback registration. Set a callback to receive notifications for
+/// the corresponding event type across all windows. Each setter returns the
+/// previously registered callback (or `null`), allowing callback chaining.
+///
+/// ```zig
+/// const prev = wndw.callbacks.setWindowMoved(struct {
+///     fn cb(win: *wndw.rgfw_h.RGFW_window, x: i32, y: i32) callconv(.C) void {
+///         _ = win;
+///         std.debug.print("moved to {d},{d}\n", .{ x, y });
+///     }
+/// }.cb);
+/// ```
+pub const callbacks = struct {
+    /// Registers a callback for debug/error messages from RGFW.
+    /// Returns the previously registered callback.
+    pub fn setDebug(func: DebugFunc) DebugFunc {
+        return rgfw_h.RGFW_setDebugCallback(func);
+    }
+
+    /// Registers a callback for window move events.
+    pub fn setWindowMoved(func: WindowMovedFunc) WindowMovedFunc {
+        return rgfw_h.RGFW_setWindowMovedCallback(func);
+    }
+
+    /// Registers a callback for window resize events.
+    pub fn setWindowResized(func: WindowResizedFunc) WindowResizedFunc {
+        return rgfw_h.RGFW_setWindowResizedCallback(func);
+    }
+
+    /// Registers a callback for window quit (close request) events.
+    pub fn setWindowQuit(func: WindowQuitFunc) WindowQuitFunc {
+        return rgfw_h.RGFW_setWindowQuitCallback(func);
+    }
+
+    /// Registers a callback for mouse position change events.
+    pub fn setMousePos(func: MousePosFunc) MousePosFunc {
+        return rgfw_h.RGFW_setMousePosCallback(func);
+    }
+
+    /// Registers a callback for window refresh (repaint needed) events.
+    pub fn setWindowRefresh(func: WindowRefreshFunc) WindowRefreshFunc {
+        return rgfw_h.RGFW_setWindowRefreshCallback(func);
+    }
+
+    /// Registers a callback for focus change events.
+    pub fn setFocus(func: FocusFunc) FocusFunc {
+        return rgfw_h.RGFW_setFocusCallback(func);
+    }
+
+    /// Registers a callback for mouse enter/leave events.
+    pub fn setMouseNotify(func: MouseNotifyFunc) MouseNotifyFunc {
+        return rgfw_h.RGFW_setMouseNotifyCallback(func);
+    }
+
+    /// Registers a callback for file drop events.
+    pub fn setDataDrop(func: DataDropFunc) DataDropFunc {
+        return rgfw_h.RGFW_setDataDropCallback(func);
+    }
+
+    /// Registers a callback for file drag events.
+    pub fn setDataDrag(func: DataDragFunc) DataDragFunc {
+        return rgfw_h.RGFW_setDataDragCallback(func);
+    }
+
+    /// Registers a callback for key press/release events.
+    pub fn setKey(func: KeyFunc) KeyFunc {
+        return rgfw_h.RGFW_setKeyCallback(func);
+    }
+
+    /// Registers a callback for Unicode character input events.
+    pub fn setKeyChar(func: KeyCharFunc) KeyCharFunc {
+        return rgfw_h.RGFW_setKeyCharCallback(func);
+    }
+
+    /// Registers a callback for mouse button press/release events.
+    pub fn setMouseButton(func: MouseButtonFunc) MouseButtonFunc {
+        return rgfw_h.RGFW_setMouseButtonCallback(func);
+    }
+
+    /// Registers a callback for mouse scroll events.
+    pub fn setMouseScroll(func: MouseScrollFunc) MouseScrollFunc {
+        return rgfw_h.RGFW_setMouseScrollCallback(func);
+    }
+
+    /// Registers a callback for window maximized events.
+    pub fn setWindowMaximized(func: WindowMaximizedFunc) WindowMaximizedFunc {
+        return rgfw_h.RGFW_setWindowMaximizedCallback(func);
+    }
+
+    /// Registers a callback for window minimized events.
+    pub fn setWindowMinimized(func: WindowMinimizedFunc) WindowMinimizedFunc {
+        return rgfw_h.RGFW_setWindowMinimizedCallback(func);
+    }
+
+    /// Registers a callback for window restored events.
+    pub fn setWindowRestored(func: WindowRestoredFunc) WindowRestoredFunc {
+        return rgfw_h.RGFW_setWindowRestoredCallback(func);
+    }
+
+    /// Registers a callback for content scale change events.
+    pub fn setScaleUpdated(func: ScaleUpdatedFunc) ScaleUpdatedFunc {
+        return rgfw_h.RGFW_setScaleUpdatedCallback(func);
+    }
+
+    /// Registers a callback for monitor connect/disconnect events.
+    pub fn setMonitor(func: MonitorFunc) MonitorFunc {
+        return rgfw_h.RGFW_setMonitorCallback(func);
+    }
+};
+
+// ──────────────────────────────────────────────
+// Debug messaging
+// ──────────────────────────────────────────────
+
+/// Sends a debug message through RGFW's debug callback system.
+/// If a debug callback has been registered via `callbacks.setDebug`, it will
+/// be invoked with the given severity, error code, and message.
+///
+/// ```zig
+/// wndw.sendDebugInfo(wndw.debug_type.info, wndw.error_code.no_error, "App initialized");
+/// ```
+pub fn sendDebugInfo(dtype: DebugType, err: ErrorCode, msg: [*:0]const u8) void {
+    rgfw_h.RGFW_sendDebugInfo(dtype, err, msg);
+}
 
 // ──────────────────────────────────────────────
 // Format constants
@@ -364,6 +655,19 @@ pub const key = struct {
     pub const f10: Key = rgfw_h.RGFW_F10;
     pub const f11: Key = rgfw_h.RGFW_F11;
     pub const f12: Key = rgfw_h.RGFW_F12;
+    pub const f13: Key = rgfw_h.RGFW_F13;
+    pub const f14: Key = rgfw_h.RGFW_F14;
+    pub const f15: Key = rgfw_h.RGFW_F15;
+    pub const @"f16": Key = rgfw_h.RGFW_F16;
+    pub const f17: Key = rgfw_h.RGFW_F17;
+    pub const f18: Key = rgfw_h.RGFW_F18;
+    pub const f19: Key = rgfw_h.RGFW_F19;
+    pub const f20: Key = rgfw_h.RGFW_F20;
+    pub const f21: Key = rgfw_h.RGFW_F21;
+    pub const f22: Key = rgfw_h.RGFW_F22;
+    pub const f23: Key = rgfw_h.RGFW_F23;
+    pub const f24: Key = rgfw_h.RGFW_F24;
+    pub const f25: Key = rgfw_h.RGFW_F25;
 
     // Modifiers
     pub const caps_lock: Key = rgfw_h.RGFW_capsLock;
@@ -400,6 +704,24 @@ pub const key = struct {
     pub const kp_7: Key = rgfw_h.RGFW_kp7;
     pub const kp_8: Key = rgfw_h.RGFW_kp8;
     pub const kp_9: Key = rgfw_h.RGFW_kp9;
+
+    // International
+    /// Non-US key #1.
+    pub const world1: Key = rgfw_h.RGFW_world1;
+    /// Non-US key #2.
+    pub const world2: Key = rgfw_h.RGFW_world2;
+
+    // Sentinel
+    /// Upper bound / padding value for key arrays. Not a real key.
+    pub const last: Key = rgfw_h.RGFW_keyLast;
+
+    // Convenience aliases
+    /// Alias for `@"return"` — avoids the need for `@""` quoting.
+    pub const enter: Key = rgfw_h.RGFW_return;
+    /// Alias for `equal`.
+    pub const equals: Key = rgfw_h.RGFW_equal;
+    /// Alias for `kp_equal`.
+    pub const kp_equals: Key = rgfw_h.RGFW_kpEqual;
 };
 
 // ──────────────────────────────────────────────
@@ -469,6 +791,24 @@ pub const cursor = struct {
     pub const wait: MouseIcon = rgfw_h.RGFW_mouseWait;
     /// Background activity cursor (arrow + spinner).
     pub const progress: MouseIcon = rgfw_h.RGFW_mouseProgress;
+
+    // Directional resize cursors
+    /// North-west resize cursor.
+    pub const resize_nw: MouseIcon = rgfw_h.RGFW_mouseResizeNW;
+    /// North resize cursor.
+    pub const resize_n: MouseIcon = rgfw_h.RGFW_mouseResizeN;
+    /// North-east resize cursor.
+    pub const resize_ne: MouseIcon = rgfw_h.RGFW_mouseResizeNE;
+    /// East resize cursor.
+    pub const resize_e: MouseIcon = rgfw_h.RGFW_mouseResizeE;
+    /// South-east resize cursor.
+    pub const resize_se: MouseIcon = rgfw_h.RGFW_mouseResizeSE;
+    /// South resize cursor.
+    pub const resize_s: MouseIcon = rgfw_h.RGFW_mouseResizeS;
+    /// South-west resize cursor.
+    pub const resize_sw: MouseIcon = rgfw_h.RGFW_mouseResizeSW;
+    /// West resize cursor.
+    pub const resize_w: MouseIcon = rgfw_h.RGFW_mouseResizeW;
 };
 
 // ──────────────────────────────────────────────
@@ -529,7 +869,7 @@ pub const Monitor = struct {
 
     /// Returns the human-readable monitor name as a Zig slice (no allocation).
     pub fn name(self: Monitor) []const u8 {
-        const raw: [*]const u8 = &self.handle.*.name;
+        const raw: [*]const u8 = @ptrCast(rgfw_h.RGFW_monitor_getName(self.handle));
         const len = blk: {
             var idx: usize = 0;
             while (idx < 128 and raw[idx] != 0) : (idx += 1) {}
@@ -540,12 +880,18 @@ pub const Monitor = struct {
 
     /// Returns the top-left corner of the monitor's workarea in screen coordinates.
     pub fn position(self: Monitor) Point {
-        return .{ .x = self.handle.*.x, .y = self.handle.*.y };
+        var x: i32 = 0;
+        var y: i32 = 0;
+        _ = rgfw_h.RGFW_monitor_getPosition(self.handle, &x, &y);
+        return .{ .x = x, .y = y };
     }
 
     /// Returns the content scale factors. 1.0 = standard, 2.0 = HiDPI/Retina.
     pub fn scale(self: Monitor) struct { x: f32, y: f32 } {
-        return .{ .x = self.handle.*.scaleX, .y = self.handle.*.scaleY };
+        var x: f32 = 0;
+        var y: f32 = 0;
+        _ = rgfw_h.RGFW_monitor_getScale(self.handle, &x, &y);
+        return .{ .x = x, .y = y };
     }
 
     /// Returns the pixel ratio (1.0 for standard displays, 2.0 for HiDPI).
@@ -555,7 +901,10 @@ pub const Monitor = struct {
 
     /// Returns the physical display size in inches.
     pub fn physicalSize(self: Monitor) struct { w: f32, h: f32 } {
-        return .{ .w = self.handle.*.physW, .h = self.handle.*.physH };
+        var w: f32 = 0;
+        var h: f32 = 0;
+        _ = rgfw_h.RGFW_monitor_getPhysicalSize(self.handle, &w, &h);
+        return .{ .w = w, .h = h };
     }
 
     /// Returns the current display mode (resolution and refresh rate).
@@ -638,6 +987,26 @@ pub const Monitor = struct {
     pub fn getUserPtr(self: Monitor, comptime T: type) ?*T {
         const raw = rgfw_h.RGFW_monitor_getUserPtr(self.handle) orelse return null;
         return @ptrCast(@alignCast(raw));
+    }
+
+    /// Fills a pre-allocated `GammaRamp` with this monitor's gamma ramp data.
+    /// Returns the ramp entry count. Pass a `null`-data ramp to query the count first.
+    pub fn getGammaRampPtr(self: Monitor, ramp: *GammaRamp) usize {
+        return rgfw_h.RGFW_monitor_getGammaRampPtr(self.handle, ramp);
+    }
+
+    /// Sets the monitor's gamma using a pre-allocated channel array.
+    /// `gamma` is the exponent, `ptr` is the LUT data, and `count` is the array length.
+    /// Returns `true` on success.
+    pub fn setGammaPtr(self: Monitor, gamma: f32, ptr: [*]u16, count: usize) bool {
+        return toBool(rgfw_h.RGFW_monitor_setGammaPtr(self.handle, gamma, ptr, count));
+    }
+
+    /// Fills a pre-allocated mode array with this monitor's supported modes.
+    /// Returns the number of modes written. If `modes` is `null`, returns the
+    /// estimated count without writing.
+    pub fn getModesPtr(self: Monitor, modes: *[*]MonitorMode) usize {
+        return rgfw_h.RGFW_monitor_getModesPtr(self.handle, modes);
     }
 };
 
@@ -883,6 +1252,20 @@ pub fn setXInstName(name_str: [:0]const u8) void {
 }
 
 // ──────────────────────────────────────────────
+// OpenGL types
+// ──────────────────────────────────────────────
+
+/// Opaque handle to an OpenGL rendering context.
+pub const GlContext = rgfw_h.RGFW_glContext;
+
+// ──────────────────────────────────────────────
+// EGL types
+// ──────────────────────────────────────────────
+
+/// Opaque handle to an EGL rendering context.
+pub const EglContext = rgfw_h.RGFW_eglContext;
+
+// ──────────────────────────────────────────────
 // OpenGL global functions
 // ──────────────────────────────────────────────
 
@@ -927,7 +1310,137 @@ pub const gl = struct {
         const w = rgfw_h.RGFW_getCurrentWindow_OpenGL() orelse return null;
         return .{ .handle = w };
     }
+
+    /// Returns the native platform context handle from an `GlContext`, or `null`.
+    /// Useful for interop with platform-specific OpenGL APIs.
+    pub fn getSourceContext(ctx: *GlContext) ?*anyopaque {
+        return rgfw_h.RGFW_glContext_getSourceContext(ctx);
+    }
+
+    /// Returns the raw native OpenGL context currently active on the calling thread, or `null`.
+    /// Unlike `getCurrentWindow`, this returns the platform context handle directly.
+    pub fn getCurrentContext() ?*anyopaque {
+        return rgfw_h.RGFW_getCurrentContext_OpenGL();
+    }
+
+    /// Returns `true` if the named OpenGL extension is supported by the platform
+    /// (e.g. WGL, GLX, or EGL), as opposed to the GL implementation itself.
+    pub fn extensionSupportedPlatform(extension: [:0]const u8) bool {
+        return toBool(rgfw_h.RGFW_extensionSupportedPlatform_OpenGL(extension.ptr, extension.len));
+    }
 };
+
+// ──────────────────────────────────────────────
+// EGL global functions
+// ──────────────────────────────────────────────
+
+/// Global EGL utilities for platforms using EGL (Linux/Wayland, Android, embedded).
+/// These symbols are always present so the module compiles unconditionally.
+pub const egl = struct {
+    /// Returns the EGL display connection, or `null` if unavailable.
+    pub fn getDisplay() ?*anyopaque {
+        return rgfw_h.RGFW_getDisplay_EGL();
+    }
+
+    /// Returns the native EGL context handle from an `EglContext`, or `null`.
+    pub fn getSourceContext(ctx: *EglContext) ?*anyopaque {
+        return rgfw_h.RGFW_eglContext_getSourceContext(ctx);
+    }
+
+    /// Returns the EGL surface handle from an `EglContext`, or `null`.
+    pub fn getSurface(ctx: *EglContext) ?*anyopaque {
+        return rgfw_h.RGFW_eglContext_getSurface(ctx);
+    }
+
+    /// Returns the Wayland EGL window handle from an `EglContext`, or `null`.
+    /// Only meaningful on Wayland.
+    pub fn wlEGLWindow(ctx: *EglContext) ?*anyopaque {
+        const ptr = rgfw_h.RGFW_eglContext_wlEGLWindow(ctx);
+        return @ptrCast(ptr);
+    }
+
+    /// Returns the raw EGL context currently active on the calling thread, or `null`.
+    pub fn getCurrentContext() ?*anyopaque {
+        return rgfw_h.RGFW_getCurrentContext_EGL();
+    }
+
+    /// Returns the window whose EGL context is currently active, or `null`.
+    pub fn getCurrentWindow() ?Window {
+        const w = rgfw_h.RGFW_getCurrentWindow_EGL() orelse return null;
+        return .{ .handle = w };
+    }
+
+    /// Looks up an EGL function by name. Cast the result to the appropriate function pointer.
+    /// Returns `null` if the function is not available.
+    pub fn getProcAddress(procname: [:0]const u8) ?*const anyopaque {
+        const addr = rgfw_h.RGFW_getProcAddress_EGL(procname.ptr);
+        return @ptrCast(addr);
+    }
+
+    /// Returns `true` if the named EGL extension is supported by the GL implementation.
+    pub fn extensionSupported(extension: [:0]const u8) bool {
+        return toBool(rgfw_h.RGFW_extensionSupported_EGL(extension.ptr, extension.len));
+    }
+
+    /// Returns `true` if the named EGL extension is supported by the platform.
+    pub fn extensionSupportedPlatform(extension: [:0]const u8) bool {
+        return toBool(rgfw_h.RGFW_extensionSupportedPlatform_EGL(extension.ptr, extension.len));
+    }
+};
+
+// ──────────────────────────────────────────────
+// Vulkan (requires rgfw_vulkan build option)
+// ──────────────────────────────────────────────
+
+/// Vulkan interop utilities. Only available when the `rgfw_vulkan` build option is enabled.
+/// When disabled, this is an empty struct.
+///
+/// ```zig
+/// // Build with: zig build -Drgfw_vulkan=true
+/// const extensions = wndw.vulkan.getRequiredInstanceExtensions();
+/// ```
+pub const vulkan = if (@hasDecl(rgfw_h, "RGFW_getRequiredInstanceExtensions_Vulkan")) struct {
+    pub const VkResult = rgfw_h.VkResult;
+    pub const VkInstance = rgfw_h.VkInstance;
+    pub const VkSurfaceKHR = rgfw_h.VkSurfaceKHR;
+    pub const VkPhysicalDevice = rgfw_h.VkPhysicalDevice;
+
+    /// Returns the Vulkan instance extensions required by RGFW (typically `VK_KHR_surface`
+    /// and a platform-specific surface extension).
+    pub fn getRequiredInstanceExtensions() struct { extensions: [*]const [*:0]const u8, count: usize } {
+        var count: usize = 0;
+        const exts = rgfw_h.RGFW_getRequiredInstanceExtensions_Vulkan(&count);
+        return .{ .extensions = @ptrCast(exts), .count = count };
+    }
+
+    /// Checks whether the given physical device and queue family support presentation.
+    pub fn getPresentationSupport(physical_device: VkPhysicalDevice, queue_family_index: u32) bool {
+        return toBool(rgfw_h.RGFW_getPresentationSupport_Vulkan(physical_device, queue_family_index));
+    }
+} else struct {};
+
+// ──────────────────────────────────────────────
+// DirectX (requires rgfw_directx build option, Windows only)
+// ──────────────────────────────────────────────
+
+/// DirectX interop utilities. Only available when the `rgfw_directx` build option is
+/// enabled on Windows. When disabled or on non-Windows platforms, this is an empty struct.
+pub const directx = if (@hasDecl(rgfw_h, "RGFW_window_createSwapChain_DirectX")) struct {
+    pub const IDXGIFactory = rgfw_h.IDXGIFactory;
+    pub const IUnknown = rgfw_h.IUnknown;
+    pub const IDXGISwapChain = rgfw_h.IDXGISwapChain;
+} else struct {};
+
+// ──────────────────────────────────────────────
+// WebGPU (requires rgfw_webgpu build option)
+// ──────────────────────────────────────────────
+
+/// WebGPU interop utilities. Only available when the `rgfw_webgpu` build option is enabled.
+/// When disabled, this is an empty struct.
+pub const webgpu = if (@hasDecl(rgfw_h, "RGFW_window_createSurface_WebGPU")) struct {
+    pub const WGPUSurface = rgfw_h.WGPUSurface;
+    pub const WGPUInstance = rgfw_h.WGPUInstance;
+} else struct {};
 
 // ──────────────────────────────────────────────
 // Window
@@ -1027,6 +1540,13 @@ pub const Window = struct {
     /// The `Window` value must not be used after calling this.
     pub fn close(self: Window) void {
         rgfw_h.RGFW_window_close(self.handle);
+    }
+
+    /// Closes the window without freeing the underlying memory.
+    /// Use this when the `RGFW_window` was allocated externally (e.g. via `initPtr`)
+    /// and you want to manage the memory yourself.
+    pub fn closePtr(self: Window) void {
+        rgfw_h.RGFW_window_closePtr(self.handle);
     }
 
     // ── State queries ────────────────────────
@@ -1516,6 +2036,13 @@ pub const Window = struct {
         rgfw_h.RGFW_window_blitSurface(self.handle, surface);
     }
 
+    /// Creates a surface into a pre-allocated `Surface` struct, using this window's
+    /// visual (important on X11 where visuals may differ between windows).
+    /// Returns `true` on success.
+    pub fn createSurfacePtr(self: Window, data: [*]u8, w: i32, h: i32, fmt: Format, surface: *Surface) bool {
+        return toBool(rgfw_h.RGFW_window_createSurfacePtr(self.handle, data, w, h, fmt, surface));
+    }
+
     // ── OpenGL (requires rgfw_opengl build option) ──
 
     /// Presents the OpenGL back buffer (equivalent to `glSwapBuffers`).
@@ -1539,6 +2066,169 @@ pub const Window = struct {
     pub fn deleteContext(self: Window) void {
         const ctx = rgfw_h.RGFW_window_getContext_OpenGL(self.handle) orelse return;
         rgfw_h.RGFW_window_deleteContext_OpenGL(self.handle, ctx);
+    }
+
+    /// Creates a new OpenGL context for this window using the given hints.
+    /// Returns the context, or `null` on failure. The caller owns the returned context
+    /// and must free it with `deleteContextPtrOpenGL`.
+    pub fn createOpenGLContext(self: Window, hints: *GlHints) ?*GlContext {
+        return rgfw_h.RGFW_window_createContext_OpenGL(self.handle, hints);
+    }
+
+    /// Creates an OpenGL context into a pre-allocated `GlContext`.
+    /// Returns `true` on success.
+    pub fn createOpenGLContextPtr(self: Window, ctx: *GlContext, hints: *GlHints) bool {
+        return toBool(rgfw_h.RGFW_window_createContextPtr_OpenGL(self.handle, ctx, hints));
+    }
+
+    /// Makes this window current using the platform OpenGL API directly.
+    /// Unlike `makeContextCurrent`, this bypasses any RGFW tracking.
+    pub fn makeCurrentWindowOpenGL(self: Window) void {
+        rgfw_h.RGFW_window_makeCurrentWindow_OpenGL(self.handle);
+    }
+
+    /// Destroys a specific OpenGL context without freeing the `GlContext` memory.
+    /// Use this for contexts created with `createOpenGLContextPtr`.
+    pub fn deleteContextPtrOpenGL(self: Window, ctx: *GlContext) void {
+        rgfw_h.RGFW_window_deleteContextPtr_OpenGL(self.handle, ctx);
+    }
+
+    // ── EGL (requires rgfw_egl build option) ──
+
+    /// Creates a new EGL context for this window using the given hints.
+    /// Returns the context, or `null` on failure.
+    pub fn createEGLContext(self: Window, hints: *GlHints) ?*EglContext {
+        return rgfw_h.RGFW_window_createContext_EGL(self.handle, hints);
+    }
+
+    /// Creates an EGL context into a pre-allocated `EglContext`.
+    /// Returns `true` on success.
+    pub fn createEGLContextPtr(self: Window, ctx: *EglContext, hints: *GlHints) bool {
+        return toBool(rgfw_h.RGFW_window_createContextPtr_EGL(self.handle, ctx, hints));
+    }
+
+    /// Destroys an EGL context and frees its memory.
+    pub fn deleteEGLContext(self: Window, ctx: *EglContext) void {
+        rgfw_h.RGFW_window_deleteContext_EGL(self.handle, ctx);
+    }
+
+    /// Destroys an EGL context without freeing the `EglContext` memory.
+    /// Use this for contexts created with `createEGLContextPtr`.
+    pub fn deleteEGLContextPtr(self: Window, ctx: *EglContext) void {
+        rgfw_h.RGFW_window_deleteContextPtr_EGL(self.handle, ctx);
+    }
+
+    /// Returns the EGL context associated with this window, or `null`.
+    pub fn getEGLContext(self: Window) ?*EglContext {
+        return rgfw_h.RGFW_window_getContext_EGL(self.handle);
+    }
+
+    /// Presents the EGL back buffer for this window.
+    pub fn swapBuffersEGL(self: Window) void {
+        rgfw_h.RGFW_window_swapBuffers_EGL(self.handle);
+    }
+
+    /// Makes this window's EGL context current using the platform API directly.
+    pub fn makeCurrentWindowEGL(self: Window) void {
+        rgfw_h.RGFW_window_makeCurrentWindow_EGL(self.handle);
+    }
+
+    /// Makes this window's EGL context current via RGFW tracking.
+    /// Pass `null` to release the context from the current thread
+    /// (useful when moving a context between threads).
+    pub fn makeCurrentContextEGL(self: Window) void {
+        rgfw_h.RGFW_window_makeCurrentContext_EGL(self.handle);
+    }
+
+    /// Sets the EGL swap interval for this window. `0` = no VSync, `1` = VSync.
+    pub fn swapIntervalEGL(self: Window, interval: i32) void {
+        rgfw_h.RGFW_window_swapInterval_EGL(self.handle, interval);
+    }
+
+    // ── Vulkan (requires rgfw_vulkan build option) ──
+
+    /// Creates a Vulkan surface for this window.
+    /// Returns `VK_SUCCESS` on success; writes the surface handle to `surface`.
+    /// Only available when `rgfw_vulkan` build option is enabled.
+    pub const createVulkanSurface = if (@hasDecl(rgfw_h, "RGFW_window_createSurface_Vulkan"))
+        struct {
+            fn call(self: Window, instance: vulkan.VkInstance, surface: *vulkan.VkSurfaceKHR) vulkan.VkResult {
+                return rgfw_h.RGFW_window_createSurface_Vulkan(self.handle, instance, surface);
+            }
+        }.call
+    else
+        @as(?void, null);
+
+    // ── DirectX (requires rgfw_directx build option, Windows only) ──
+
+    /// Creates a DirectX swap chain for this window.
+    /// Returns `0` on success; writes the swap chain to `swapchain`.
+    /// Only available when `rgfw_directx` build option is enabled on Windows.
+    pub const createDirectXSwapChain = if (@hasDecl(rgfw_h, "RGFW_window_createSwapChain_DirectX"))
+        struct {
+            fn call(self: Window, factory: *directx.IDXGIFactory, device: *directx.IUnknown, swapchain: **directx.IDXGISwapChain) i32 {
+                return rgfw_h.RGFW_window_createSwapChain_DirectX(self.handle, factory, device, swapchain);
+            }
+        }.call
+    else
+        @as(?void, null);
+
+    // ── WebGPU (requires rgfw_webgpu build option) ──
+
+    /// Creates a WebGPU surface for this window.
+    /// Returns the `WGPUSurface` handle.
+    /// Only available when `rgfw_webgpu` build option is enabled.
+    pub const createWebGPUSurface = if (@hasDecl(rgfw_h, "RGFW_window_createSurface_WebGPU"))
+        struct {
+            fn call(self: Window, instance: webgpu.WGPUInstance) webgpu.WGPUSurface {
+                return rgfw_h.RGFW_window_createSurface_WebGPU(self.handle, instance);
+            }
+        }.call
+    else
+        @as(?void, null);
+
+    // ── Platform-native handles ───────────────
+
+    /// Returns a pointer to the internal platform source struct.
+    /// The layout is platform-specific and opaque unless the `rgfw_native` build option is set.
+    pub fn getSrc(self: Window) *rgfw_h.RGFW_window_src {
+        return rgfw_h.RGFW_window_getSrc(self.handle);
+    }
+
+    /// Returns the macOS `NSView*` for this window, or `null` on other platforms.
+    pub fn getViewOSX(self: Window) ?*anyopaque {
+        return rgfw_h.RGFW_window_getView_OSX(self.handle);
+    }
+
+    /// Returns the macOS `NSWindow*` for this window, or `null` on other platforms.
+    pub fn getWindowOSX(self: Window) ?*anyopaque {
+        return rgfw_h.RGFW_window_getWindow_OSX(self.handle);
+    }
+
+    /// Sets the Core Animation layer for this window (macOS only). No-op on other platforms.
+    pub fn setLayerOSX(self: Window, layer: ?*anyopaque) void {
+        rgfw_h.RGFW_window_setLayer_OSX(self.handle, layer);
+    }
+
+    /// Returns the Win32 `HWND` for this window, or `null` on other platforms.
+    pub fn getHWND(self: Window) ?*anyopaque {
+        return rgfw_h.RGFW_window_getHWND(self.handle);
+    }
+
+    /// Returns the Win32 `HDC` (device context) for this window, or `null` on other platforms.
+    pub fn getHDC(self: Window) ?*anyopaque {
+        return rgfw_h.RGFW_window_getHDC(self.handle);
+    }
+
+    /// Returns the X11 window handle for this window, or `0` on other platforms.
+    pub fn getWindowX11(self: Window) u64 {
+        return rgfw_h.RGFW_window_getWindow_X11(self.handle);
+    }
+
+    /// Returns the Wayland `wl_surface*` for this window, or `null` on other platforms.
+    pub fn getWindowWayland(self: Window) ?*anyopaque {
+        const ptr = rgfw_h.RGFW_window_getWindow_Wayland(self.handle);
+        return @ptrCast(ptr);
     }
 
     // ── User data ────────────────────────────
@@ -1605,6 +2295,28 @@ pub fn initAt(title: [:0]const u8, x: i32, y: i32, width: i32, height: i32, opti
     return .{ .handle = window };
 }
 
+/// Creates a window into a pre-allocated `RGFW_window` buffer.
+/// Use this when you manage window memory yourself (e.g. via `alloc` / `sizeofWindow`).
+///
+/// ```zig
+/// const buf: *rgfw_h.RGFW_window = @ptrCast(@alignCast(wndw.alloc(wndw.sizeofWindow())));
+/// var win = try wndw.createWindowPtr("Hello", 0, 0, 800, 600, .{}, buf);
+/// defer win.closePtr();
+/// ```
+pub fn createWindowPtr(title: [:0]const u8, x: i32, y: i32, width: i32, height: i32, options: Window.FlagOptions, win: *rgfw_h.RGFW_window) Error!Window {
+    const window = rgfw_h.RGFW_createWindowPtr(
+        title.ptr,
+        x,
+        y,
+        width,
+        height,
+        options.toFlags(0),
+        win,
+    ) orelse return error.CreateWindowFailed;
+
+    return .{ .handle = window };
+}
+
 // ──────────────────────────────────────────────
 // Library init / deinit
 // ──────────────────────────────────────────────
@@ -1623,6 +2335,81 @@ pub fn deinitBackend() void {
 }
 
 // ──────────────────────────────────────────────
+// RGFW_info lifecycle
+// ──────────────────────────────────────────────
+
+/// Opaque handle to the global RGFW library state.
+pub const Info = rgfw_h.RGFW_info;
+
+/// Returns the size in bytes of the `Info` struct.
+/// Useful for pre-allocating memory before calling `initPtr`.
+pub fn sizeofInfo() usize {
+    return rgfw_h.RGFW_sizeofInfo();
+}
+
+/// Initialises RGFW using a caller-provided `Info` struct.
+/// This avoids RGFW's internal allocation and gives you full control over the
+/// library state's lifetime. Returns `0` on success.
+pub fn initPtr(info: *Info) i32 {
+    return rgfw_h.RGFW_init_ptr(info);
+}
+
+/// Tears down a specific RGFW instance stored in the provided `Info` pointer.
+pub fn deinitPtr(info: *Info) void {
+    rgfw_h.RGFW_deinit_ptr(info);
+}
+
+/// Replaces the global `Info` pointer used by RGFW.
+/// All subsequent RGFW operations will use this instance.
+pub fn setInfo(info: *Info) void {
+    rgfw_h.RGFW_setInfo(info);
+}
+
+/// Returns the current global `Info` pointer, or `null` if RGFW has not been initialised.
+pub fn getInfo() ?*Info {
+    return rgfw_h.RGFW_getInfo();
+}
+
+// ──────────────────────────────────────────────
+// Allocator API
+// ──────────────────────────────────────────────
+
+/// Allocates `size` bytes using RGFW's internal allocator (defaults to `malloc`).
+/// Useful when you need memory compatible with `rgfwFree`.
+pub fn alloc(size: usize) ?*anyopaque {
+    return rgfw_h.RGFW_alloc(size);
+}
+
+/// Frees memory previously allocated with `alloc`.
+pub fn free(ptr: *anyopaque) void {
+    rgfw_h.RGFW_free(ptr);
+}
+
+// ──────────────────────────────────────────────
+// Sizeof helpers
+// ──────────────────────────────────────────────
+
+/// Returns the size in bytes of the `RGFW_window` struct.
+pub fn sizeofWindow() usize {
+    return rgfw_h.RGFW_sizeofWindow();
+}
+
+/// Returns the size in bytes of the platform-specific `RGFW_window_src` struct.
+pub fn sizeofWindowSrc() usize {
+    return rgfw_h.RGFW_sizeofWindowSrc();
+}
+
+/// Returns the size in bytes of the `RGFW_nativeImage` struct.
+pub fn sizeofNativeImage() usize {
+    return rgfw_h.RGFW_sizeofNativeImage();
+}
+
+/// Returns the size in bytes of the `RGFW_surface` struct.
+pub fn sizeofSurface() usize {
+    return rgfw_h.RGFW_sizeofSurface();
+}
+
+// ──────────────────────────────────────────────
 // Surface creation (standalone)
 // ──────────────────────────────────────────────
 
@@ -1635,6 +2422,67 @@ pub fn createSurface(data: [*]u8, w: i32, h: i32, fmt: Format) ?*Surface {
 /// Frees a `Surface` previously created with `createSurface` or `Window.createSurface`.
 pub fn freeSurface(surface: *Surface) void {
     rgfw_h.RGFW_surface_free(surface);
+}
+
+// ──────────────────────────────────────────────
+// Surface ptr-variants
+// ──────────────────────────────────────────────
+
+/// Creates a standalone surface into a pre-allocated `Surface` struct.
+/// Returns `true` on success.
+///
+/// Note: on X11, this uses the root window's visual. Use `Window.createSurfacePtr`
+/// if the surface must match a specific window's visual.
+pub fn createSurfacePtr(data: [*]u8, w: i32, h: i32, fmt: Format, surface: *Surface) bool {
+    return toBool(rgfw_h.RGFW_createSurfacePtr(data, w, h, fmt, surface));
+}
+
+/// Frees only the internal buffers of a surface, leaving the `Surface` struct itself intact.
+/// Use this for surfaces created with `createSurfacePtr` or `Window.createSurfacePtr`.
+pub fn freeSurfacePtr(surface: *Surface) void {
+    rgfw_h.RGFW_surface_freePtr(surface);
+}
+
+// ──────────────────────────────────────────────
+// Image data conversion
+// ──────────────────────────────────────────────
+
+/// Describes a pixel colour channel layout (offsets and channel count).
+pub const ColorLayout = rgfw_h.RGFW_colorLayout;
+
+/// Callback for custom pixel format conversion. Receives dest/src buffers,
+/// their layouts, and the pixel count.
+pub const ConvertImageDataFunc = rgfw_h.RGFW_convertImageDataFunc;
+
+/// Opaque handle to a platform-native image (used internally by surfaces).
+pub const NativeImage = rgfw_h.RGFW_nativeImage;
+
+/// Converts pixel data between formats. If `func` is `null`, the built-in converter is used.
+///
+/// ```zig
+/// wndw.copyImageData(dest.ptr, 800, 600, wndw.format.rgba8, src.ptr, wndw.format.bgra8, null);
+/// ```
+pub fn copyImageData(
+    dest_data: [*]u8,
+    w: i32,
+    h: i32,
+    dest_format: Format,
+    src_data: [*]u8,
+    src_format: Format,
+    func: ?ConvertImageDataFunc,
+) void {
+    rgfw_h.RGFW_copyImageData(dest_data, w, h, dest_format, src_data, src_format, func);
+}
+
+/// Sets the function used for converting surface pixel data between formats.
+/// Pass `null` to restore the default converter.
+pub fn surfaceSetConvertFunc(surface: *Surface, func: ?ConvertImageDataFunc) void {
+    rgfw_h.RGFW_surface_setConvertFunc(surface, func);
+}
+
+/// Returns the platform-native image backing a surface, or `null`.
+pub fn surfaceGetNativeImage(surface: *Surface) ?*NativeImage {
+    return rgfw_h.RGFW_surface_getNativeImage(surface);
 }
 
 // ──────────────────────────────────────────────
@@ -1718,6 +2566,35 @@ pub fn moveToMacOSResourceDir() void {
 pub fn useWayland(wayland: bool) void {
     rgfw_h.RGFW_useWayland(fromBool(wayland));
 }
+
+/// Returns `true` if RGFW is currently using the Wayland backend (Linux only).
+/// Always returns `false` on non-Linux platforms.
+pub fn usingWayland() bool {
+    return toBool(rgfw_h.RGFW_usingWayland());
+}
+
+// ──────────────────────────────────────────────
+// Platform-native global accessors
+// ──────────────────────────────────────────────
+
+/// Returns the macOS Core Animation layer, or `null` on other platforms.
+pub fn getLayerOSX() ?*anyopaque {
+    return rgfw_h.RGFW_getLayer_OSX();
+}
+
+/// Returns the X11 `Display*`, or `null` on other platforms.
+pub fn getDisplayX11() ?*anyopaque {
+    return rgfw_h.RGFW_getDisplay_X11();
+}
+
+/// Returns the Wayland `wl_display*`, or `null` on other platforms.
+pub fn getDisplayWayland() ?*anyopaque {
+    const ptr = rgfw_h.RGFW_getDisplay_Wayland();
+    return @ptrCast(ptr);
+}
+
+/// Type alias for the platform-specific internal window source struct.
+pub const WindowSrc = rgfw_h.RGFW_window_src;
 
 // ──────────────────────────────────────────────
 // UTF-8 utilities
