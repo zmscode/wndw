@@ -143,11 +143,40 @@ pub const Key = enum {
 
 pub const MouseButton = enum { left, right, middle, x1, x2 };
 
+// ── Cursor ───────────────────────────────────────────────────────────────────
+
+pub const Cursor = enum {
+    arrow,
+    ibeam,
+    crosshair,
+    closed_hand,
+    open_hand,
+    pointing_hand,
+    resize_left_right,
+    resize_up_down,
+    not_allowed,
+};
+
+// ── Modifiers ────────────────────────────────────────────────────────────────
+
+pub const Modifiers = struct {
+    shift: bool = false,
+    ctrl: bool = false,
+    alt: bool = false,
+    super: bool = false,
+    caps_lock: bool = false,
+};
+
+pub const KeyEvent = struct {
+    key: Key,
+    mods: Modifiers = .{},
+};
+
 // ── Event ─────────────────────────────────────────────────────────────────────
 
 pub const Event = union(enum) {
-    key_pressed: Key,
-    key_released: Key,
+    key_pressed: KeyEvent,
+    key_released: KeyEvent,
     mouse_pressed: MouseButton,
     mouse_released: MouseButton,
     mouse_moved: struct { x: i32, y: i32 },
@@ -159,4 +188,12 @@ pub const Event = union(enum) {
     close_requested,
     minimized,
     restored,
+    mouse_entered,
+    mouse_left,
+    maximized,
+    refresh_requested,
+    scale_changed: f32,
+    file_drop_started,
+    file_dropped: u32, // number of files — retrieve paths via getDroppedFiles()
+    file_drop_left,
 };

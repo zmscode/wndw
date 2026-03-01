@@ -144,8 +144,8 @@ test "MouseButton: all five buttons distinct" {
 
 test "Event: all 11 tags constructible" {
     const events = [_]Event{
-        .{ .key_pressed = .a },
-        .{ .key_released = .a },
+        .{ .key_pressed = .{ .key = .a } },
+        .{ .key_released = .{ .key = .a } },
         .{ .mouse_pressed = .left },
         .{ .mouse_released = .left },
         .{ .mouse_moved = .{ .x = 0, .y = 0 } },
@@ -159,9 +159,9 @@ test "Event: all 11 tags constructible" {
     try std.testing.expectEqual(@as(usize, 11), events.len);
 }
 
-test "Event: key payload is Key" {
-    const e = Event{ .key_pressed = .escape };
-    const k: Key = e.key_pressed;
+test "Event: key payload has key and mods" {
+    const e = Event{ .key_pressed = .{ .key = .escape } };
+    const k: Key = e.key_pressed.key;
     try std.testing.expectEqual(Key.escape, k);
 }
 
@@ -194,7 +194,7 @@ test "Event: resized payload fields are i32" {
 }
 
 test "Event: active tag check" {
-    const e = Event{ .key_pressed = .tab };
+    const e = Event{ .key_pressed = .{ .key = .tab } };
     try std.testing.expect(e == .key_pressed);
 
     const e2 = Event.close_requested;

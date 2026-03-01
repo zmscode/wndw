@@ -44,6 +44,11 @@ pub extern fn object_setInstanceVariable(obj: id, name: [*:0]const u8, value: ?*
 /// Do not call directly — always cast via msgSend().
 pub extern fn objc_msgSend() void;
 
+// ── CoreGraphics ─────────────────────────────────────────────────────────────
+
+pub const CGPoint = NSPoint; // identical on 64-bit
+pub extern fn CGWarpMouseCursorPosition(point: CGPoint) i32;
+
 // ── msgSend helper ────────────────────────────────────────────────────────────
 
 /// Send an ObjC message. `obj` is the receiver (id or Class), `sel_name` is the

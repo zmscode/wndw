@@ -18,7 +18,7 @@ pub fn main() !void {
     while (!win.shouldClose()) {
         while (win.poll()) |ev| {
             switch (ev) {
-                .key_pressed => |k| if (k == .escape) win.quit(),
+                .key_pressed => |kp| if (kp.key == .escape) win.quit(),
                 else => {},
             }
         }
@@ -67,8 +67,8 @@ defer win.close();
 ```zig
 while (win.poll()) |ev| {
     switch (ev) {
-        .key_pressed => |k| { },
-        .key_released => |k| { },
+        .key_pressed => |kp| { _ = kp.key; _ = kp.mods; },
+        .key_released => |kr| { _ = kr.key; _ = kr.mods; },
         .mouse_pressed => |btn| { },
         .mouse_released => |btn| { },
         .mouse_moved => |m| { _ = m.x; _ = m.y; },
@@ -80,6 +80,11 @@ while (win.poll()) |ev| {
         .close_requested => {},
         .minimized => {},
         .restored => {},
+        .mouse_entered => {},
+        .mouse_left => {},
+        .maximized => {},
+        .refresh_requested => {},
+        .scale_changed => |s| { _ = s; },
     }
 }
 ```
