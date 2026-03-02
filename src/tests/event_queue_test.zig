@@ -1,3 +1,7 @@
+/// Tests for the EventQueue circular buffer.
+///
+/// Verifies FIFO ordering, overflow behaviour (drop newest), wrap-around
+/// correctness, mixed event types, and the `len()` counter.
 const std = @import("std");
 const eq = @import("../event_queue.zig");
 const ev = @import("../event.zig");

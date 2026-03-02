@@ -1,4 +1,8 @@
-/// Tests for event types added beyond the original 11.
+/// Tests for extended event types and modifier key support.
+///
+/// Covers event tags added after the initial 11 (minimized, restored,
+/// mouse_entered, maximized, scale_changed, file_drop_*, etc.) plus
+/// the Modifiers struct and KeyEvent payload fields.
 const std = @import("std");
 const ev = @import("../event.zig");
 const eq = @import("../event_queue.zig");

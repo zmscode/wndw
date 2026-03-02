@@ -1,66 +1,102 @@
-/// ObjC runtime extern declarations.
+/// ObjC runtime extern declarations — the foundation of the pure-Zig macOS backend.
 ///
 /// No headers needed. libobjc is bundled inside Cocoa.framework — linking
-/// `-framework Cocoa` is sufficient to resolve all symbols here.
+/// `-framework Cocoa` in build.zig is sufficient to resolve all symbols here.
 ///
-/// On arm64 (Apple Silicon), objc_msgSend handles all return types including
-/// structs and floats. objc_msgSend_stret / objc_msgSend_fpret are not needed.
-const std = @import("std"); // used by ns_class panic
+/// On arm64 (Apple Silicon), `objc_msgSend` handles ALL return types including
+/// structs (NSRect, NSPoint, NSSize) and floats. The x86-only variants
+/// `objc_msgSend_stret` and `objc_msgSend_fpret` are not needed.
+///
+/// The key abstraction is the `msgSend()` helper function which wraps
+/// `objc_msgSend` with a type-safe Zig interface. Instead of:
+///   `@as(*const fn(id,SEL,id)callconv(.c)void, @ptrCast(&objc_msgSend))(obj, sel, arg)`
+/// you write:
+///   `msgSend(void, obj, "setTitle:", .{ns_string_obj})`
+const std = @import("std");
 
 // ── Core types ────────────────────────────────────────────────────────────────
+/// These mirror the ObjC runtime's fundamental types.
 
+/// An ObjC object pointer (equivalent to `id` in ObjC).
 pub const id = *anyopaque;
+/// An ObjC selector (equivalent to `SEL`).
 pub const SEL = *anyopaque;
+/// An ObjC class object (equivalent to `Class`).
 pub const Class = *anyopaque;
+/// An ObjC method implementation pointer.
 pub const IMP = *const fn () callconv(.c) void;
 
+/// ObjC `BOOL` — `YES` (1) or `NO` (0). Signed i8 to match the ABI.
 pub const BOOL = i8;
+/// Unsigned pointer-sized integer (NSUInteger in ObjC).
 pub const NSUInteger = usize;
+/// Signed pointer-sized integer (NSInteger in ObjC).
 pub const NSInteger = isize;
+/// Core Graphics floating point type (always f64 on 64-bit).
 pub const CGFloat = f64;
 
 pub const YES: BOOL = 1;
 pub const NO: BOOL = 0;
 
 // ── Geometry ──────────────────────────────────────────────────────────────────
+/// These `extern struct` types match the C ABI layout of their CoreGraphics
+/// equivalents. They can be passed to/from `objc_msgSend` directly on arm64.
 
 pub const NSPoint = extern struct { x: CGFloat, y: CGFloat };
 pub const NSSize = extern struct { width: CGFloat, height: CGFloat };
 pub const NSRect = extern struct { origin: NSPoint, size: NSSize };
 
 // ── Runtime functions ─────────────────────────────────────────────────────────
+/// Direct `extern fn` declarations against libobjc. These are linked at
+/// build time via `-framework Cocoa` and resolved by the dynamic linker.
 
+/// Look up a class by name. Returns `null` if the class isn't loaded.
 pub extern fn objc_getClass(name: [*:0]const u8) ?Class;
+/// Register (or look up) a selector by name.
 pub extern fn sel_registerName(name: [*:0]const u8) SEL;
+/// Alias for `sel_registerName` — same behaviour.
 pub extern fn sel_getUid(name: [*:0]const u8) SEL;
+/// Create a new ObjC class at runtime (not yet registered — call
+/// `objc_registerClassPair` after adding ivars and methods).
 pub extern fn objc_allocateClassPair(superclass: ?Class, name: [*:0]const u8, extra: usize) ?Class;
+/// Finalise a runtime-created class so it can be instantiated.
 pub extern fn objc_registerClassPair(cls: Class) void;
+/// Add a method to a class. `types` is an ObjC type encoding string
+/// (e.g. "v@:@" for `void (id self, SEL _cmd, id arg)`).
 pub extern fn class_addMethod(cls: Class, sel: SEL, imp: IMP, types: [*:0]const u8) BOOL;
+/// Add an instance variable to a class (must be called before registering).
 pub extern fn class_addIvar(cls: Class, name: [*:0]const u8, size: usize, alignment: u8, types: [*:0]const u8) BOOL;
+/// Get the superclass of a class.
 pub extern fn class_getSuperclass(cls: Class) ?Class;
+/// Read an instance variable's value (as a raw pointer).
 pub extern fn object_getInstanceVariable(obj: id, name: [*:0]const u8, out: *?*anyopaque) void;
+/// Write an instance variable's value.
 pub extern fn object_setInstanceVariable(obj: id, name: [*:0]const u8, value: ?*anyopaque) void;
 
-/// Do not call directly — always cast via msgSend().
+/// The universal message-sending function. NEVER call directly — always
+/// cast to the correct function pointer type via `msgSend()` below.
 pub extern fn objc_msgSend() void;
 
 // ── CoreGraphics ─────────────────────────────────────────────────────────────
 
-pub const CGPoint = NSPoint; // identical on 64-bit
+/// Alias: `CGPoint` and `NSPoint` are identical on 64-bit.
+pub const CGPoint = NSPoint;
+/// Warp the mouse cursor to an absolute screen position.
 pub extern fn CGWarpMouseCursorPosition(point: CGPoint) i32;
 
 // ── msgSend helper ────────────────────────────────────────────────────────────
 
-/// Send an ObjC message. `obj` is the receiver (id or Class), `sel_name` is the
-/// selector string, `args` is a tuple of additional arguments. Returns `Ret`.
+/// Type-safe ObjC message send. Casts `objc_msgSend` to a function pointer
+/// matching the return type `Ret` and the argument tuple `args`.
 ///
-/// Supports 0–4 extra arguments. Uses per-arity explicit casts; @Type(.fn) is
-/// not supported for function types in this Zig version.
+/// Supports 0–4 extra arguments (beyond the implicit `self` and `_cmd`).
+/// Uses per-arity explicit casts because `@Type(.{ .@"fn" = ... })` is not
+/// supported for building function types in Zig 0.16.0-dev.
 ///
 /// Example:
 /// ```zig
-///   const app = msgSend(id, ns_class("NSApplication"), "sharedApplication", .{});
-///   msgSend(void, app, "activateIgnoringOtherApps:", .{YES});
+/// const app = msgSend(id, ns_class("NSApplication"), "sharedApplication", .{});
+/// msgSend(void, app, "activateIgnoringOtherApps:", .{YES});
 /// ```
 pub fn msgSend(comptime Ret: type, obj: anytype, sel_name: [*:0]const u8, args: anytype) Ret {
     const sel = sel_registerName(sel_name);
@@ -77,17 +113,18 @@ pub fn msgSend(comptime Ret: type, obj: anytype, sel_name: [*:0]const u8, args: 
     };
 }
 
-/// Convenience: get an ObjC class, panic if not found.
+/// Look up an ObjC class by name, panicking if not found.
+/// Use this for classes that must exist (NSWindow, NSApplication, etc.).
 pub fn ns_class(name: [*:0]const u8) Class {
     return objc_getClass(name) orelse std.debug.panic("ObjC class not found: {s}", .{name});
 }
 
-/// Create an NSString from a null-terminated UTF-8 slice.
+/// Create an autoreleased NSString from a null-terminated UTF-8 C string.
 pub fn ns_string(s: [*:0]const u8) id {
     return msgSend(id, ns_class("NSString"), "stringWithUTF8String:", .{s});
 }
 
-/// Retain an ObjC object (returns the same object).
+/// Retain an ObjC object (increment reference count). Returns the same pointer.
 pub fn ns_retain(obj: id) id {
     return msgSend(id, obj, "retain", .{});
 }

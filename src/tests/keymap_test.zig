@@ -1,3 +1,8 @@
+/// Tests for the macOS hardware keycode → Key mapping table.
+///
+/// Verifies that every key group (letters, digits, arrows, function keys,
+/// modifiers, numpad, punctuation) maps correctly, and that unmapped or
+/// out-of-range keycodes return `.unknown`.
 const std = @import("std");
 const keymap = @import("../platform/macos/keymap.zig");
 const Key = keymap.Key;

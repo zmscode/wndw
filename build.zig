@@ -1,9 +1,20 @@
+/// Build configuration for the wndw windowing library.
+///
+/// Produces a static library (`libwndw.a`) and provides:
+///   - `zig build`          — build the library
+///   - `zig build test`     — run all unit tests
+///   - `zig build run`      — run the default demo (`demo.zig`)
+///   - `zig build run -- X` — run a named demo (`X.zig`)
+///
+/// Platform linking is handled per-OS. Currently only macOS is implemented;
+/// adding a new platform means adding a branch to the switch below.
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // The wndw module — this is what consumers `@import("wndw")`.
     const mod = b.addModule("wndw", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -11,16 +22,17 @@ pub fn build(b: *std.Build) void {
     });
 
     // ── Platform linking ──────────────────────────────────────────────────────
-    // No C source files — pure extern fn declarations only.
-    // Adding a new platform = one new branch here.
+    // No C source files — the backend uses pure `extern fn` declarations.
+    // Each platform branch links the necessary system frameworks/libraries.
     switch (target.result.os.tag) {
         .macos => {
-            // Cocoa bundles libobjc; linking it is sufficient for the ObjC
-            // runtime + AppKit symbols used in src/platform/macos/.
-            // addSystemFrameworkPath is linker-only — it does NOT add the SDK
-            // path to any C compiler include path (there are no C files here),
-            // so the libDER/DERItem.h error that affected the RGFW build cannot
-            // occur.
+            // Cocoa.framework bundles libobjc + AppKit + CoreGraphics +
+            // CoreFoundation. That's everything we need for the ObjC runtime
+            // calls in src/platform/macos/.
+            //
+            // addSystemFrameworkPath is linker-only — it does NOT add SDK
+            // headers to any C compiler include path (there are no C files),
+            // so the libDER/DERItem.h SDK bug cannot occur.
             if (b.sysroot == null) {
                 if (macOSSdkPath(b)) |sdk| {
                     mod.addSystemFrameworkPath(.{ .cwd_relative = b.fmt("{s}/System/Library/Frameworks", .{sdk}) });
@@ -42,8 +54,10 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(lib);
 
-    // ── Demo runner: `zig build run -- <name>` ────────────────────────────────
-    // Defaults to "demo" if no argument is provided.
+    // ── Demo runner ──────────────────────────────────────────────────────────
+    // `zig build run` compiles and runs `demo.zig` by default.
+    // `zig build run -- gl_demo` compiles and runs `gl_demo.zig`.
+    // The demo file gets the wndw module as an import.
     const demo_name = if (b.args) |args|
         if (args.len > 0) args[0] else "demo"
     else
@@ -70,13 +84,17 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 
     // ── Tests ─────────────────────────────────────────────────────────────────
+    // Two test targets:
+    //   1. Module tests — tests embedded in the wndw module itself.
+    //   2. Unit tests — the dedicated test suite in src/tests.zig, which
+    //      imports all src/tests/*.zig files. These are kept in a separate
+    //      module so they can use relative imports from src/ without escaping
+    //      the module boundary.
     const mod_tests = b.addTest(.{ .root_module = mod });
     const run_tests = b.addRunArtifact(mod_tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_tests.step);
 
-    // Unit tests — rooted at src/tests.zig so all src/tests/*.zig files share
-    // the src/ module root and can import siblings via relative "../" paths.
     const unit_test_mod = b.createModule(.{
         .root_source_file = b.path("src/tests.zig"),
         .target = target,
@@ -86,8 +104,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&b.addRunArtifact(unit_tests).step);
 }
 
-/// Returns the macOS SDK root without relying on xcrun.
-/// Checks SDKROOT env var first, then falls back to the standard Xcode path.
+/// Locate the macOS SDK without shelling out to `xcrun`.
+/// Checks the `SDKROOT` environment variable first, then falls back to
+/// the standard Xcode command-line tools path.
 fn macOSSdkPath(b: *std.Build) ?[]const u8 {
     if (b.graph.environ_map.get("SDKROOT")) |p| return p;
     const default = "/Applications/Xcode.app/Contents/Developer/Platforms/" ++
