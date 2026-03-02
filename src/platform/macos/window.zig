@@ -211,6 +211,11 @@ pub const Window = struct {
     gl_context: ?objc.id = null,
     gl_format: ?objc.id = null,
 
+    /// OpenGL function pointer type with the alignment that zgl expects.
+    /// Matches `zgl.binding.FunctionPointer` so `glGetProcAddress` can be
+    /// passed directly to `zgl.loadExtensions()`.
+    pub const FnPtr = *align(@alignOf(fn (u32) callconv(.c) u32)) const anyopaque;
+
     const MAX_DROP_FILES = 64;
 
     // ── Callbacks ─────────────────────────────────────────────────────────────
@@ -1059,6 +1064,22 @@ pub const Window = struct {
         const cf_name = CFStringCreateWithCString(null, name, kCFStringEncodingASCII) orelse return null;
         defer CFRelease(cf_name);
         return CFBundleGetFunctionPointerForName(bundle, cf_name);
+    }
+
+    /// OpenGL proc-address loader compatible with zgl's `loadExtensions`.
+    ///
+    /// Thin adapter around `getProcAddress` that converts the string type
+    /// (`[:0]const u8` → `[*:0]const u8`) and adds the alignment cast that
+    /// zgl requires for its `binding.FunctionPointer` type.
+    ///
+    /// Usage with zgl:
+    /// ```zig
+    /// const gl = @import("zgl");
+    /// try gl.loadExtensions(&win, wndw.Window.glGetProcAddress);
+    /// ```
+    pub fn glGetProcAddress(win: *Window, name: [:0]const u8) ?FnPtr {
+        const raw = win.getProcAddress(name.ptr) orelse return null;
+        return @ptrCast(@alignCast(raw));
     }
 };
 
