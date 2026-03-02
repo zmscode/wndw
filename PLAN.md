@@ -222,28 +222,35 @@ Query connected displays. All reads, no mutations.
 
 ---
 
-## Phase 9 — OpenGL Context
+## Phase 9 — OpenGL Context ✅ DONE
 
 Create and manage an NSOpenGLContext. First graphics backend.
 
-| # | Feature | macOS API |
-|---|---------|-----------|
-| 1 | `createGLContext(hints)` | `NSOpenGLPixelFormat` + `NSOpenGLContext` |
-| 2 | `makeContextCurrent()` | `[NSOpenGLContext makeCurrentContext]` |
-| 3 | `swapBuffers()` | `[NSOpenGLContext flushBuffer]` |
-| 4 | `setSwapInterval(i32)` | `[NSOpenGLContext setValues:forParameter:]` |
-| 5 | `deleteContext()` | `[NSOpenGLContext clearCurrentContext]` + release |
+| # | Feature | macOS API | Status |
+|---|---------|-----------|--------|
+| 1 | `GLHints` struct | depth, stencil, samples, profile, double_buffer | ✅ |
+| 2 | `createGLContext(hints)` | `NSOpenGLPixelFormat` + `NSOpenGLContext` | ✅ |
+| 3 | `makeContextCurrent()` | `[NSOpenGLContext makeCurrentContext]` | ✅ |
+| 4 | `swapBuffers()` | `[NSOpenGLContext flushBuffer]` | ✅ |
+| 5 | `setSwapInterval(i32)` | `[context setValues:forParameter:]` | ✅ |
+| 6 | `deleteContext()` | `[NSOpenGLContext clearCurrentContext]` + release | ✅ |
+| 7 | `getProcAddress(name)` | CFBundle (`com.apple.opengl`) | ✅ |
 
-**TDD plan:**
-- `@hasDecl` checks for all GL methods
-- GLHints struct field checks
-- Can't test actual GL without a window — use demo for smoke testing
+**Tests:** `src/tests/opengl_test.zig` — 12 tests (GLHints fields + defaults, Window fields,
+`@hasDecl` for all 6 methods).
 
-**Implementation notes:**
-- NSOpenGLPixelFormat attributes built from hints (depth bits, stencil, MSAA, profile)
-- Constants already in `cocoa.zig` (NSOpenGLPFA*, profiles)
-- Consider deprecation: Apple deprecated NSOpenGL in favour of Metal. Still works on
-  macOS 14+. For maximum compat, may want Metal backend later.
+**Learnings:**
+- RGFW replaces the NSView with NSOpenGLView; we use `setView:` on existing NSView (simpler).
+- Pixel format attribute array is null-terminated u32, with flag-only entries (no value).
+- `initWithAttributes:` and `initWithFormat:shareContext:` need manual fn pointer casts.
+- `setValues:forParameter:` takes `*const i32` — needs cast. Parameter 222 = swap interval.
+- `getProcAddress` uses CFBundle (like RGFW), not dlsym — `CFBundleGetBundleWithIdentifier`
+  with `"com.apple.opengl"`, then `CFBundleGetFunctionPointerForName`.
+- RGFW's `NSOpenGLProfileVersion4_1Core` is wrongly defined as 0x3200 (same as 3.2) — we
+  use the correct 0x4100.
+- Apple's Metal-backed GL compatibility provides GL 4.1 on Apple Silicon.
+- Added `gl_format` field to store pixel format for proper cleanup (release both on delete).
+- Default to GL 3.2 Core (not legacy 1.0 like RGFW) — more practical default.
 
 ---
 

@@ -11,4 +11,5 @@ comptime {
     _ = @import("tests/window_methods_test.zig");
     _ = @import("tests/input_state_test.zig");
     _ = @import("tests/event_callbacks_test.zig");
+    _ = @import("tests/opengl_test.zig");
 }

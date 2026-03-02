@@ -10,6 +10,15 @@ const event = @import("../../event.zig");
 pub const Event = event.Event;
 pub const Key = event.Key;
 
+// ── CoreFoundation externs (for getProcAddress via CFBundle) ────────────────
+
+extern fn CFBundleGetBundleWithIdentifier(bundleID: *anyopaque) ?*anyopaque;
+extern fn CFStringCreateWithCString(alloc: ?*anyopaque, cStr: [*:0]const u8, encoding: u32) ?*anyopaque;
+extern fn CFBundleGetFunctionPointerForName(bundle: *anyopaque, name: *anyopaque) ?*anyopaque;
+extern fn CFRelease(cf: *anyopaque) void;
+
+const kCFStringEncodingASCII: u32 = 0x0600;
+
 // ── Options ───────────────────────────────────────────────────────────────────
 
 pub const Options = struct {
@@ -66,6 +75,19 @@ fn monitor_from_screen(screen: objc.id) Monitor {
     };
 }
 
+// ── GLHints ──────────────────────────────────────────────────────────────────
+
+pub const GLHints = struct {
+    major: u32 = 3,
+    minor: u32 = 2,
+    depth_bits: u32 = 24,
+    stencil_bits: u32 = 0,
+    samples: u32 = 0,
+    double_buffer: bool = true,
+    srgb: bool = false,
+    transparent: bool = false,
+};
+
 // ── Window ────────────────────────────────────────────────────────────────────
 
 pub const Window = struct {
@@ -89,6 +111,8 @@ pub const Window = struct {
     drop_paths: [MAX_DROP_FILES][*:0]const u8 = undefined,
     input_state: InputState = .{},
     callbacks: Callbacks = .{},
+    gl_context: ?objc.id = null,
+    gl_format: ?objc.id = null,
 
     const MAX_DROP_FILES = 64;
 
@@ -654,6 +678,147 @@ pub const Window = struct {
         const FnSetFrame = fn (objc.id, objc.SEL, objc.NSRect, objc.BOOL) callconv(.c) void;
         const fn_set: *const FnSetFrame = @ptrCast(&objc.objc_msgSend);
         fn_set(win.ns_window, objc.sel_registerName("setFrame:display:"), new_frame, objc.YES);
+    }
+
+    // ── OpenGL context ────────────────────────────────────────────────────
+
+    pub fn createGLContext(win: *Window, hints: GLHints) !void {
+        // Build pixel format attribute array (key-value pairs, flag-only entries, null-terminated)
+        var attrs: [30]u32 = undefined;
+        var i: usize = 0;
+
+        attrs[i] = cocoa.NSOpenGLPFAColorSize;
+        i += 1;
+        attrs[i] = 8;
+        i += 1;
+        attrs[i] = cocoa.NSOpenGLPFAAlphaSize;
+        i += 1;
+        attrs[i] = 8;
+        i += 1;
+        attrs[i] = cocoa.NSOpenGLPFADepthSize;
+        i += 1;
+        attrs[i] = hints.depth_bits;
+        i += 1;
+        attrs[i] = cocoa.NSOpenGLPFAStencilSize;
+        i += 1;
+        attrs[i] = hints.stencil_bits;
+        i += 1;
+
+        if (hints.samples > 0) {
+            attrs[i] = cocoa.NSOpenGLPFASampleBuffers;
+            i += 1;
+            attrs[i] = 1;
+            i += 1;
+            attrs[i] = cocoa.NSOpenGLPFASamples;
+            i += 1;
+            attrs[i] = hints.samples;
+            i += 1;
+        }
+
+        if (hints.double_buffer) {
+            attrs[i] = cocoa.NSOpenGLPFADoubleBuffer;
+            i += 1;
+        }
+
+        attrs[i] = cocoa.NSOpenGLPFAClosestPolicy;
+        i += 1;
+        attrs[i] = cocoa.NSOpenGLPFAAccelerated;
+        i += 1;
+
+        // Profile selection (matching RGFW logic)
+        attrs[i] = cocoa.NSOpenGLPFAOpenGLProfile;
+        i += 1;
+        attrs[i] = if (hints.major >= 4)
+            cocoa.NSOpenGLProfileVersion4_1Core
+        else if (hints.major >= 3)
+            cocoa.NSOpenGLProfileVersion3_2Core
+        else
+            cocoa.NSOpenGLProfileVersionLegacy;
+        i += 1;
+
+        attrs[i] = 0; // null terminator
+
+        // Create pixel format
+        const FnInitAttrs = fn (objc.id, objc.SEL, [*]const u32) callconv(.c) ?objc.id;
+        const fn_init_attrs: *const FnInitAttrs = @ptrCast(&objc.objc_msgSend);
+        const fmt_alloc = objc.msgSend(objc.id, objc.ns_class("NSOpenGLPixelFormat"), "alloc", .{});
+        const fmt = fn_init_attrs(fmt_alloc, objc.sel_registerName("initWithAttributes:"), &attrs) orelse
+            return error.PixelFormatFailed;
+
+        // Create context
+        const FnInitCtx = fn (objc.id, objc.SEL, objc.id, ?objc.id) callconv(.c) ?objc.id;
+        const fn_init_ctx: *const FnInitCtx = @ptrCast(&objc.objc_msgSend);
+        const ctx_alloc = objc.msgSend(objc.id, objc.ns_class("NSOpenGLContext"), "alloc", .{});
+        const ctx = fn_init_ctx(ctx_alloc, objc.sel_registerName("initWithFormat:shareContext:"), fmt, null) orelse {
+            objc.msgSend(void, fmt, "release", .{});
+            return error.ContextCreationFailed;
+        };
+
+        // Attach context to view
+        objc.msgSend(void, ctx, "setView:", .{win.ns_view});
+        objc.msgSend(void, win.ns_view, "setWantsLayer:", .{objc.YES});
+
+        // Transparent surface if requested
+        if (hints.transparent) {
+            var opacity: i32 = 0;
+            const FnSetValues = fn (objc.id, objc.SEL, *const i32, i32) callconv(.c) void;
+            const fn_sv: *const FnSetValues = @ptrCast(&objc.objc_msgSend);
+            fn_sv(ctx, objc.sel_registerName("setValues:forParameter:"), &opacity, cocoa.NSOpenGLContextParameterSurfaceOpacity);
+        }
+
+        // Make current + vsync off (matching RGFW)
+        objc.msgSend(void, ctx, "makeCurrentContext", .{});
+        win.gl_context = ctx;
+        win.gl_format = fmt;
+        win.setSwapInterval(0);
+    }
+
+    pub fn makeContextCurrent(win: *Window) void {
+        if (win.gl_context) |ctx| {
+            objc.msgSend(void, ctx, "makeCurrentContext", .{});
+        }
+    }
+
+    pub fn swapBuffers(win: *Window) void {
+        if (win.gl_context) |ctx| {
+            objc.msgSend(void, ctx, "flushBuffer", .{});
+        }
+    }
+
+    pub fn setSwapInterval(win: *Window, interval: i32) void {
+        if (win.gl_context) |ctx| {
+            var val = interval;
+            const FnSetValues = fn (objc.id, objc.SEL, *const i32, i32) callconv(.c) void;
+            const fn_sv: *const FnSetValues = @ptrCast(&objc.objc_msgSend);
+            fn_sv(ctx, objc.sel_registerName("setValues:forParameter:"), &val, cocoa.NSOpenGLContextParameterSwapInterval);
+        }
+    }
+
+    pub fn deleteContext(win: *Window) void {
+        // Clear current context (class method)
+        objc.msgSend(void, objc.ns_class("NSOpenGLContext"), "clearCurrentContext", .{});
+        if (win.gl_context) |ctx| {
+            objc.msgSend(void, ctx, "release", .{});
+            win.gl_context = null;
+        }
+        if (win.gl_format) |fmt| {
+            objc.msgSend(void, fmt, "release", .{});
+            win.gl_format = null;
+        }
+    }
+
+    pub fn getProcAddress(_: *Window, name: [*:0]const u8) ?*anyopaque {
+        const S = struct {
+            var bundle: ?*anyopaque = null;
+        };
+        if (S.bundle == null) {
+            const bundle_id = CFStringCreateWithCString(null, "com.apple.opengl", kCFStringEncodingASCII) orelse return null;
+            S.bundle = CFBundleGetBundleWithIdentifier(bundle_id);
+        }
+        const bundle = S.bundle orelse return null;
+        const cf_name = CFStringCreateWithCString(null, name, kCFStringEncodingASCII) orelse return null;
+        defer CFRelease(cf_name);
+        return CFBundleGetFunctionPointerForName(bundle, cf_name);
     }
 };
 

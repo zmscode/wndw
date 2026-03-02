@@ -25,6 +25,7 @@ pub const Position     = @import("event.zig").Position;
 pub const Size         = @import("event.zig").Size;
 pub const ScrollDelta  = @import("event.zig").ScrollDelta;
 pub const Options      = platform.Options;
+pub const GLHints      = platform.GLHints;
 
 // ── Top-level API ─────────────────────────────────────────────────────────────
 
