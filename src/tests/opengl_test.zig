@@ -76,3 +76,16 @@ test "Window has deleteContext" {
 test "Window has getProcAddress" {
     try std.testing.expect(@hasDecl(Window, "getProcAddress"));
 }
+
+// ── GL context resize update ─────────────────────────────────────────────────
+
+test "Window: updateGLContextIfNeeded exists" {
+    try std.testing.expect(@hasDecl(Window, "updateGLContextIfNeeded"));
+}
+
+// ── close() cleanup ──────────────────────────────────────────────────────────
+
+test "Window has close and deleteContext for GL cleanup" {
+    try std.testing.expect(@hasDecl(Window, "close"));
+    try std.testing.expect(@hasDecl(Window, "deleteContext"));
+}

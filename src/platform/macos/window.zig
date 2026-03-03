@@ -400,6 +400,7 @@ pub const Window = struct {
     /// Destroy the window and free its memory. Nils the delegate first to
     /// prevent stale callbacks from firing after the Window struct is freed.
     pub fn close(win: *Window) void {
+        win.deleteContext();
         objc.msgSend(void, win.ns_window, "setDelegate:", .{@as(?objc.id, null)});
         objc.msgSend(void, win.ns_window, "orderOut:", .{@as(?objc.id, null)});
         objc.msgSend(void, win.ns_window, "close", .{});
@@ -1047,6 +1048,14 @@ pub const Window = struct {
         }
     }
 
+    /// Sends `[NSOpenGLContext update]` if an OpenGL context is attached.
+    /// Called automatically on resize; exposed for manual use if needed.
+    pub fn updateGLContextIfNeeded(win: *Window) void {
+        if (win.gl_context) |ctx| {
+            objc.msgSend(void, ctx, "update", .{});
+        }
+    }
+
     /// Load an OpenGL function pointer by name at runtime.
     ///
     /// Uses CFBundle to look up symbols in the `com.apple.opengl` framework.
@@ -1416,6 +1425,7 @@ fn delegate_window_did_resize(self: objc.id, _: objc.SEL, _: objc.id) callconv(.
     win.w = @intFromFloat(frame.size.width);
     win.h = @intFromFloat(frame.size.height);
     win.queue.push(.{ .resized = .{ .w = win.w, .h = win.h } });
+    win.updateGLContextIfNeeded();
     if (objc.msgSend(objc.BOOL, win.ns_window, "isZoomed", .{}) != objc.NO) {
         win.queue.push(.maximized);
     }
