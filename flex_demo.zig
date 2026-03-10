@@ -188,6 +188,10 @@ pub fn main() !void {
 
     cx.setRootRenderFn(&renderUI);
 
+    // Set initial view size from window before first render
+    const initial_size = win.getSize();
+    cx.setViewSize(@floatFromInt(initial_size.w), @floatFromInt(initial_size.h));
+
     g_cx = &cx;
     win.setDrawCallback(null, &drawCallback);
 

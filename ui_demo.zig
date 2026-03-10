@@ -88,6 +88,7 @@ pub fn main() !void {
     var win = try wndw.init("UI Phase 1 — Colored Rectangles", 600, 400, .{
         .centred = true,
         .resizable = true,
+        .inset_titlebar = true,
     });
     defer win.close();
 
@@ -95,6 +96,10 @@ pub fn main() !void {
     defer cx.deinit();
 
     cx.setRootRenderFn(&renderUI);
+
+    // Set initial view size from window before first render
+    const initial_size = win.getSize();
+    cx.setViewSize(@floatFromInt(initial_size.w), @floatFromInt(initial_size.h));
 
     // Store context globally for the draw callback
     g_cx = &cx;
