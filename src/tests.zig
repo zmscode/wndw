@@ -29,4 +29,6 @@ comptime {
     _ = @import("tests/window_order_test.zig");
     _ = @import("tests/appearance_observer_test.zig");
     _ = @import("tests/traffic_light_test.zig");
+    _ = @import("tests/fullscreen_events_test.zig");
+    _ = @import("tests/thread_safety_test.zig");
 }

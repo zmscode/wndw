@@ -423,6 +423,14 @@ pub const Window = struct {
     /// NSTimer used for synthetic 60Hz mouse-move events during left-button drag.
     /// Non-null while a drag is in progress. Invalidated on mouseUp: and close().
     drag_timer: ?objc.id = null,
+    /// True while a fullscreen enter or exit transition is in progress.
+    /// Set by `windowWillEnterFullScreen:`/`windowWillExitFullScreen:`,
+    /// cleared by the corresponding `windowDid*` callbacks.
+    is_transitioning_fullscreen: bool = false,
+    /// Mutex protecting mutable window state that may be read from multiple
+    /// threads (e.g. size, position, focus flags). Lock before reading or
+    /// writing any state field from a non-main thread.
+    state_mutex: std.Thread.Mutex = .{},
     /// Stored traffic-light button offset from the window's top-left corner.
     /// `null` means use AppKit's default position.
     traffic_light_offset: ?event.Position = null,
@@ -489,6 +497,8 @@ pub const Window = struct {
         on_file_drop_left: CbVoid = .{},
         on_text_input: Cb(event.TextInput) = .{},
         on_appearance_changed: Cb(event.Appearance) = .{},
+        on_fullscreen_entered: CbVoid = .{},
+        on_fullscreen_exited: CbVoid = .{},
     };
 
     pub fn setOnKeyPress(win: *Window, ctx: ?*anyopaque, cb: ?*const fn (?*anyopaque, event.KeyEvent) void) void {
@@ -581,6 +591,14 @@ pub const Window = struct {
 
     pub fn setOnAppearanceChanged(win: *Window, ctx: ?*anyopaque, cb: ?*const fn (?*anyopaque, event.Appearance) void) void {
         win.callbacks.on_appearance_changed = .{ .func = cb, .ctx = ctx };
+    }
+
+    pub fn setOnFullscreenEntered(win: *Window, ctx: ?*anyopaque, cb: ?*const fn (?*anyopaque) void) void {
+        win.callbacks.on_fullscreen_entered = .{ .func = cb, .ctx = ctx };
+    }
+
+    pub fn setOnFullscreenExited(win: *Window, ctx: ?*anyopaque, cb: ?*const fn (?*anyopaque) void) void {
+        win.callbacks.on_fullscreen_exited = .{ .func = cb, .ctx = ctx };
     }
 
     // ── InputState ────────────────────────────────────────────────────────────
@@ -791,6 +809,8 @@ pub const Window = struct {
             .file_drag_moved => {}, // position is in the event payload; no dedicated callback yet
             .text_input => |ti| win.callbacks.on_text_input.call(ti),
             .appearance_changed => |a| win.callbacks.on_appearance_changed.call(a),
+            .fullscreen_entered => win.callbacks.on_fullscreen_entered.call(),
+            .fullscreen_exited => win.callbacks.on_fullscreen_exited.call(),
         }
     }
 
@@ -1009,6 +1029,13 @@ pub const Window = struct {
     /// Returns `true` if the window was created with `borderless: true`.
     pub fn isBorderless(win: *const Window) bool {
         return win.is_borderless;
+    }
+
+    /// Returns `true` while a fullscreen enter/exit transition is in progress.
+    /// `setFullscreen()` returns immediately; wait for `.fullscreen_entered` or
+    /// `.fullscreen_exited` events to know when the transition completes.
+    pub fn isTransitioningFullscreen(win: *const Window) bool {
+        return win.is_transitioning_fullscreen;
     }
 
     /// Returns `true` if the window is currently in native fullscreen mode.
@@ -2135,6 +2162,10 @@ fn setup_window_delegate_class() !void {
     _ = objc.class_addMethod(g.win_delegate_cls, objc.sel_registerName("windowDidResignKey:"), @ptrCast(&delegate_window_did_resign_key), "v@:@");
     _ = objc.class_addMethod(g.win_delegate_cls, objc.sel_registerName("windowDidMiniaturize:"), @ptrCast(&delegate_window_did_miniaturize), "v@:@");
     _ = objc.class_addMethod(g.win_delegate_cls, objc.sel_registerName("windowDidDeminiaturize:"), @ptrCast(&delegate_window_did_deminiaturize), "v@:@");
+    _ = objc.class_addMethod(g.win_delegate_cls, objc.sel_registerName("windowWillEnterFullScreen:"), @ptrCast(&delegate_window_will_enter_fullscreen), "v@:@");
+    _ = objc.class_addMethod(g.win_delegate_cls, objc.sel_registerName("windowDidEnterFullScreen:"), @ptrCast(&delegate_window_did_enter_fullscreen), "v@:@");
+    _ = objc.class_addMethod(g.win_delegate_cls, objc.sel_registerName("windowWillExitFullScreen:"), @ptrCast(&delegate_window_will_exit_fullscreen), "v@:@");
+    _ = objc.class_addMethod(g.win_delegate_cls, objc.sel_registerName("windowDidExitFullScreen:"), @ptrCast(&delegate_window_did_exit_fullscreen), "v@:@");
 
     objc.objc_registerClassPair(g.win_delegate_cls);
 }
@@ -2262,6 +2293,36 @@ fn delegate_window_did_deminiaturize(self: objc.id, _: objc.SEL, _: objc.id) cal
     if (get_win_from_delegate(self)) |win| {
         win.is_minimized = false;
         win.queue.push(.restored);
+    }
+}
+
+/// `windowWillEnterFullScreen:` — fullscreen transition begins.
+fn delegate_window_will_enter_fullscreen(self: objc.id, _: objc.SEL, _: objc.id) callconv(.c) void {
+    if (get_win_from_delegate(self)) |win| {
+        win.is_transitioning_fullscreen = true;
+    }
+}
+
+/// `windowDidEnterFullScreen:` — fullscreen transition complete.
+fn delegate_window_did_enter_fullscreen(self: objc.id, _: objc.SEL, _: objc.id) callconv(.c) void {
+    if (get_win_from_delegate(self)) |win| {
+        win.is_transitioning_fullscreen = false;
+        win.queue.push(.fullscreen_entered);
+    }
+}
+
+/// `windowWillExitFullScreen:` — fullscreen exit transition begins.
+fn delegate_window_will_exit_fullscreen(self: objc.id, _: objc.SEL, _: objc.id) callconv(.c) void {
+    if (get_win_from_delegate(self)) |win| {
+        win.is_transitioning_fullscreen = true;
+    }
+}
+
+/// `windowDidExitFullScreen:` — fullscreen exit transition complete.
+fn delegate_window_did_exit_fullscreen(self: objc.id, _: objc.SEL, _: objc.id) callconv(.c) void {
+    if (get_win_from_delegate(self)) |win| {
+        win.is_transitioning_fullscreen = false;
+        win.queue.push(.fullscreen_exited);
     }
 }
 

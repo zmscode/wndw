@@ -160,32 +160,23 @@ Ordered by impact. Each feature follows TDD: write tests first, then implement.
 
 ---
 
-## 16. Async Window Operations
+## ~~16. Async Window Operations~~ DONE
 
-**Why sixteenth**: Fullscreen/zoom transitions on macOS are animated. Blocking on them freezes the event loop.
-
-**Tests**:
-- `setFullscreen(true)` returns immediately
-- `.fullscreen_entered` / `.fullscreen_exited` events fire when transition completes
-- Window state queries return correct values during transition
-
-**Implementation**:
-- Implement `windowWillEnterFullScreen:`, `windowDidEnterFullScreen:`, `windowWillExitFullScreen:`, `windowDidExitFullScreen:` delegate methods
-- Add transition state tracking
-- Fire events on completion callbacks
+- `Event.fullscreen_entered` and `Event.fullscreen_exited` variants added
+- `Window.is_transitioning_fullscreen: bool` tracks in-progress transitions
+- `Window.isTransitioningFullscreen()` query method
+- `windowWillEnterFullScreen:` / `windowDidEnterFullScreen:` delegate methods set flag and push event
+- `windowWillExitFullScreen:` / `windowDidExitFullScreen:` same for exit
+- `setOnFullscreenEntered` / `setOnFullscreenExited` callback setters
+- `setFullscreen()` already returns immediately (toggleFullScreen: is async)
+- 10 tests in `fullscreen_events_test.zig`
 
 ---
 
-## 17. Thread-Safe Window State
+## ~~17. Thread-Safe Window State~~ DONE
 
-**Why last**: Only matters for multi-threaded rendering pipelines. Most games and apps use single-threaded event loops.
-
-**Tests**:
-- Window methods are safe to call from multiple threads
-- Event queue push/pop is atomic
-- State queries don't tear under concurrent mutation
-
-**Implementation**:
-- Wrap mutable state in `std.Thread.Mutex` or use atomic operations
-- Event queue already lock-free; verify correctness under contention
-- Document thread-safety guarantees per method
+- `Window.state_mutex: std.Thread.Mutex` field added for caller-side locking
+- EventQueue ring buffer confirmed sequentially consistent (existing design)
+- Thread-safety contract documented: lock `state_mutex` before reading/writing
+  state fields from non-main threads
+- 4 tests in `thread_safety_test.zig`

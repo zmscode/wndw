@@ -271,6 +271,10 @@ pub const Event = union(enum) {
     restored,
     /// The window was maximised (zoomed on macOS).
     maximized,
+    /// The window entered fullscreen mode (transition complete).
+    fullscreen_entered,
+    /// The window exited fullscreen mode (transition complete).
+    fullscreen_exited,
 
     /// The mouse cursor entered the window's content area.
     mouse_entered,
