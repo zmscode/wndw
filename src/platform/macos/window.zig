@@ -435,6 +435,13 @@ pub const Window = struct {
     /// `null` means use AppKit's default position.
     traffic_light_offset: ?event.Position = null,
 
+    /// Optional callback invoked directly from `drawRect:`, while a valid
+    /// CoreGraphics context exists. Use this to issue CG draw calls from
+    /// a UI framework — the callback fires synchronously inside AppKit's
+    /// display cycle, before the `refresh_requested` event is queued.
+    draw_callback: ?*const fn (?*anyopaque) void = null,
+    draw_callback_ctx: ?*anyopaque = null,
+
     /// OpenGL function pointer type with the alignment that zgl expects.
     /// Matches `zgl.binding.FunctionPointer` so `glGetProcAddress` can be
     /// passed directly to `zgl.loadExtensions()`.
@@ -1090,6 +1097,25 @@ pub const Window = struct {
     /// Retrieve the pointer previously set with `setUserPtr()`, or `null`.
     pub fn getUserPtr(win: *const Window) ?*anyopaque {
         return win.user_ptr;
+    }
+
+    // ── Draw callback ────────────────────────────────────────────────────────
+
+    /// Register a callback that fires directly inside `drawRect:`, while a
+    /// valid CoreGraphics context is active. This is the hook for UI frameworks
+    /// to issue native CG draw calls.
+    pub fn setDrawCallback(win: *Window, ctx: ?*anyopaque, cb: ?*const fn (?*anyopaque) void) void {
+        win.draw_callback = cb;
+        win.draw_callback_ctx = ctx;
+    }
+
+    /// Request a redraw. Marks the view as needing display, which causes
+    /// AppKit to call `drawRect:` on the next display cycle. If a draw
+    /// callback is registered, it will fire inside that `drawRect:` call.
+    pub fn requestRedraw(win: *Window) void {
+        const FnSet = fn (objc.id, objc.SEL, objc.BOOL) callconv(.c) void;
+        const fn_set: *const FnSet = @ptrCast(&objc.objc_msgSend);
+        fn_set(win.ns_view, objc.sel_registerName("setNeedsDisplay:"), objc.YES);
     }
 
     // ── Native handles ──────────────────────────────────────────────────────
@@ -2413,8 +2439,13 @@ fn view_drag_timer_fired(self: objc.id, _: objc.SEL, _: objc.id) callconv(.c) vo
 }
 
 /// `drawRect:` — the view needs a redraw.
+/// If a draw callback is registered, it fires first (while the CG context
+/// is valid), then the `refresh_requested` event is queued as usual.
 fn view_draw_rect(self: objc.id, _: objc.SEL, _: objc.NSRect) callconv(.c) void {
-    if (get_win_from_view(self)) |win| win.queue.push(.refresh_requested);
+    if (get_win_from_view(self)) |win| {
+        if (win.draw_callback) |cb| cb(win.draw_callback_ctx);
+        win.queue.push(.refresh_requested);
+    }
 }
 
 /// `viewDidChangeBackingProperties` — scale factor changed (e.g. moved to Retina).

@@ -14,25 +14,28 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // ── Shared render types ──────────────────────────────────────────────────
+    // QuadCmd, ClipCmd — the leaf of the dependency tree. Imported by both
+    // the wndw module (platform renderer) and the ui module (draw list).
+    const render_types_mod = b.createModule(.{
+        .root_source_file = b.path("src/ui/render/types.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     // The wndw module — this is what consumers `@import("wndw")`.
     const mod = b.addModule("wndw", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
+    mod.addImport("render_types", render_types_mod);
 
     // ── Platform linking ──────────────────────────────────────────────────────
     // No C source files — the backend uses pure `extern fn` declarations.
     // Each platform branch links the necessary system frameworks/libraries.
     switch (target.result.os.tag) {
         .macos => {
-            // Cocoa.framework bundles libobjc + AppKit + CoreGraphics +
-            // CoreFoundation. That's everything we need for the ObjC runtime
-            // calls in src/platform/macos/.
-            //
-            // addSystemFrameworkPath is linker-only — it does NOT add SDK
-            // headers to any C compiler include path (there are no C files),
-            // so the libDER/DERItem.h SDK bug cannot occur.
             if (b.sysroot == null) {
                 if (macOSSdkPath(b)) |sdk| {
                     mod.addSystemFrameworkPath(.{ .cwd_relative = b.fmt("{s}/System/Library/Frameworks", .{sdk}) });
@@ -43,10 +46,20 @@ pub fn build(b: *std.Build) void {
             mod.linkFramework("Carbon", .{});
             mod.linkFramework("CoreVideo", .{});
         },
-        // .windows => { mod.linkSystemLibrary("user32", .{}); ... },
-        // .linux   => { mod.linkSystemLibrary("X11", .{}); ... },
         else => {},
     }
+
+    // ── UI module ─────────────────────────────────────────────────────────────
+    // Platform-agnostic element tree, style, layout, and draw commands.
+    // Imports the Renderer type from the wndw module (which dispatches to
+    // the platform-specific implementation at comptime).
+    const ui_mod = b.addModule("ui", .{
+        .root_source_file = b.path("src/ui/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    ui_mod.addImport("wndw", mod);
+    ui_mod.addImport("render_types", render_types_mod);
 
     // ── Library artifact ──────────────────────────────────────────────────────
     const lib = b.addLibrary(.{
@@ -57,15 +70,11 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(lib);
 
     // ── Demo runner ──────────────────────────────────────────────────────────
-    // `zig build run` compiles and runs `demo.zig` by default.
-    // `zig build run -- gl_demo` compiles and runs `gl_demo.zig`.
-    // The demo file gets the wndw module as an import.
     const raw_name: []const u8 = if (b.args) |args|
         if (args.len > 0) args[0] else "demo"
     else
         "demo";
 
-    // Reject path traversal: no slashes, backslashes, or ".." in the demo name.
     for (raw_name) |c| {
         if (c == '/' or c == '\\') @panic("demo name must not contain path separators");
     }
@@ -78,6 +87,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     demo_mod.addImport("wndw", mod);
+    demo_mod.addImport("ui", ui_mod);
 
     const demo_exe = b.addExecutable(.{
         .name = demo_name,
@@ -93,12 +103,6 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 
     // ── Tests ─────────────────────────────────────────────────────────────────
-    // Two test targets:
-    //   1. Module tests — tests embedded in the wndw module itself.
-    //   2. Unit tests — the dedicated test suite in src/tests.zig, which
-    //      imports all src/tests/*.zig files. These are kept in a separate
-    //      module so they can use relative imports from src/ without escaping
-    //      the module boundary.
     const mod_tests = b.addTest(.{ .root_module = mod });
     const run_tests = b.addRunArtifact(mod_tests);
     const test_step = b.step("test", "Run unit tests");
@@ -111,11 +115,20 @@ pub fn build(b: *std.Build) void {
     });
     const unit_tests = b.addTest(.{ .root_module = unit_test_mod });
     test_step.dependOn(&b.addRunArtifact(unit_tests).step);
+
+    // UI tests — imports the ui module (which pulls in wndw + render_types).
+    const ui_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/ui/tests.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    ui_test_mod.addImport("wndw", mod);
+    ui_test_mod.addImport("render_types", render_types_mod);
+    const ui_tests = b.addTest(.{ .root_module = ui_test_mod });
+    test_step.dependOn(&b.addRunArtifact(ui_tests).step);
 }
 
 /// Locate the macOS SDK without shelling out to `xcrun`.
-/// Checks the `SDKROOT` environment variable first, then falls back to
-/// the standard Xcode command-line tools path.
 fn macOSSdkPath(b: *std.Build) ?[]const u8 {
     if (b.graph.environ_map.get("SDKROOT")) |p| return p;
     const default = "/Applications/Xcode.app/Contents/Developer/Platforms/" ++

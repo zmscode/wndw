@@ -27,11 +27,17 @@ const event = @import("event.zig");
 ///   - `Options` struct for window creation hints
 ///   - `GLHints` struct for OpenGL context configuration
 ///   - `init(title, w, h, opts) !*Window` constructor
+///   - `Renderer` struct for native rendering (used by the UI framework)
 const platform = switch (builtin.os.tag) {
     .macos => @import("platform/macos/window.zig"),
     // .windows => @import("platform/windows/window.zig"),
     // .linux   => @import("platform/linux/x11.zig"),
     else => @compileError("wndw: platform not yet supported"),
+};
+
+const platform_renderer = switch (builtin.os.tag) {
+    .macos => @import("platform/macos/renderer.zig"),
+    else => @compileError("wndw: platform renderer not yet supported"),
 };
 
 // ── Re-exports ────────────────────────────────────────────────────────────────
@@ -55,6 +61,8 @@ pub const GLHints = platform.GLHints;
 pub const Monitor = platform.Monitor;
 /// OpenGL function pointer type compatible with zgl's `binding.FunctionPointer`.
 pub const FnPtr = Window.FnPtr;
+/// Native renderer for drawing UI framework draw commands via platform APIs.
+pub const Renderer = platform_renderer.Renderer;
 
 // ── Top-level API ─────────────────────────────────────────────────────────────
 
