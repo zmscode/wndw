@@ -63,24 +63,18 @@ Ordered by impact. Each feature follows TDD: write tests first, then implement.
 
 ---
 
-## 5. Window Kinds (NSPanel)
+## ~~5. Window Kinds (NSPanel)~~ DONE
 
-**Why fifth**: Floating palettes, tooltips, and popup menus need different focus semantics than normal windows. Without `NSPanel`, floating tool windows steal focus incorrectly.
-
-**Tests**:
-- `WindowKind` enum: `.normal`, `.floating`, `.popup`, `.dialog`
-- `.floating` creates `NSPanel` with `NSNonactivatingPanelMask`
-- `.popup` creates `NSPanel` that doesn't become key window
-- `.dialog` creates sheet-style panel attached to parent
-- `.normal` creates standard `NSWindow` (existing behavior)
-- Focus behavior differs per kind (floating doesn't deactivate parent)
-
-**Implementation**:
-- Add `WindowKind` to `Options`
-- Register `WndwPanel` ObjC class pair extending `NSPanel`
-- Branch window creation on kind: `NSWindow` vs `NSPanel`
-- Set appropriate style masks and levels per kind
-- `.dialog` takes optional parent `*Window` for sheet attachment
+- `Options.WindowKind` enum: `.normal`, `.floating`, `.popup`, `.dialog`
+- `.normal` → NSWindow (unchanged behavior)
+- `.floating` → NSPanel + `NSNonactivatingPanel` + `NSFloatingWindowLevel` + `setFloatingPanel:YES` + `setHidesOnDeactivate:NO`
+- `.popup` → NSPanel + `NSNonactivatingPanel` + `setBecomesKeyOnlyIfNeeded:YES`
+- `.dialog` → NSPanel presented as sheet via `beginSheet:completionHandler:` on `parent`
+- `Options.parent: ?*Window` for dialog sheet attachment
+- `Window.is_panel: bool` tracks whether created as NSPanel
+- `NSWindowStyleMaskNonactivatingPanel` constant added to cocoa.zig
+- Fullscreen disabled for panels (not supported by AppKit)
+- 8 tests in `window_kind_test.zig`
 
 ---
 

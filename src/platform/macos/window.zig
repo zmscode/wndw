@@ -84,6 +84,22 @@ extern var NSDefaultRunLoopMode: objc.id;
 /// Window creation options passed to `wndw.init()`.
 /// All fields default to `false` for a standard titled window.
 pub const Options = struct {
+    /// Window kind — controls the underlying Cocoa class and focus behavior.
+    pub const WindowKind = enum {
+        /// Standard NSWindow — appears in window list, can become key and main.
+        normal,
+        /// NSPanel with floating window level — stays above normal windows,
+        /// does not activate the app when clicked (palette/tool window).
+        floating,
+        /// NSPanel that does not become key — for tooltips, autocomplete
+        /// popups, and other transient UI that shouldn't steal focus.
+        popup,
+        /// NSPanel presented as a sheet attached to `parent`. Slides down
+        /// from the parent's title bar and blocks interaction with it until
+        /// dismissed. Requires `parent` to be set.
+        dialog,
+    };
+
     /// Centre the window on the primary display.
     centred: bool = false,
     /// Allow the window background to be transparent (requires clearing
@@ -99,6 +115,11 @@ pub const Options = struct {
     /// the title bar area. The traffic-light buttons remain visible but
     /// the bar itself is transparent, similar to Safari or Finder.
     inset_titlebar: bool = false,
+    /// Window kind — normal (default), floating palette, popup, or dialog.
+    kind: WindowKind = .normal,
+    /// Parent window for `.dialog` kind (sheet attachment). Ignored for
+    /// other kinds. Must be non-null when `kind == .dialog`.
+    parent: ?*Window = null,
 };
 
 // ── Global app state (initialised once) ───────────────────────────────────────
@@ -246,6 +267,8 @@ pub const Window = struct {
     is_minimized: bool = false,
     is_visible: bool = true,
     is_borderless: bool = false,
+    /// Whether this window was created as an NSPanel (floating/popup/dialog).
+    is_panel: bool = false,
     /// Opaque user pointer for associating application data with a window.
     user_ptr: ?*anyopaque = null,
     /// Cursor visibility state (tracked locally since NSCursor hide/unhide
@@ -1335,12 +1358,17 @@ pub fn init(title: [:0]const u8, w: i32, h: i32, opts: Options) !*Window {
     const screen_h = frame.size.height;
 
     // Build NSWindowStyleMask from Options.
+    const use_panel = opts.kind != .normal;
     var mask: usize = cocoa.NSWindowStyleMaskTitled |
         cocoa.NSWindowStyleMaskClosable |
         cocoa.NSWindowStyleMaskMiniaturizable;
     if (opts.resizable) mask |= cocoa.NSWindowStyleMaskResizable;
     if (opts.inset_titlebar) mask |= cocoa.NSWindowStyleMaskFullSizeContentView;
     if (opts.borderless) mask = cocoa.NSWindowStyleMaskBorderless;
+    // Floating and popup panels use NSNonactivatingPanel so they don't
+    // steal focus from the main window.
+    if (opts.kind == .floating or opts.kind == .popup)
+        mask |= cocoa.NSWindowStyleMaskNonactivatingPanel;
 
     // Compute initial position (centred or top-left).
     const cx: f64 = if (opts.centred)
@@ -1358,11 +1386,12 @@ pub fn init(title: [:0]const u8, w: i32, h: i32, opts: Options) !*Window {
         .size = .{ .width = @floatFromInt(w), .height = @floatFromInt(h) },
     };
 
-    // Create the NSWindow via initWithContentRect:styleMask:backing:defer:
+    // Create NSWindow or NSPanel depending on window kind.
+    const win_cls = if (use_panel) objc.ns_class("NSPanel") else objc.ns_class("NSWindow");
     const FnType = fn (objc.id, objc.SEL, objc.NSRect, usize, usize, objc.BOOL) callconv(.c) objc.id;
     const init_sel = objc.sel_registerName("initWithContentRect:styleMask:backing:defer:");
     const fn_ptr: *const FnType = @ptrCast(&objc.objc_msgSend);
-    const ns_win_alloc = objc.msgSend(objc.id, objc.ns_class("NSWindow"), "alloc", .{});
+    const ns_win_alloc = objc.msgSend(objc.id, win_cls, "alloc", .{});
     const ns_win = fn_ptr(
         ns_win_alloc,
         init_sel,
@@ -1373,11 +1402,34 @@ pub fn init(title: [:0]const u8, w: i32, h: i32, opts: Options) !*Window {
     );
     win.ns_window = ns_win;
     win.is_borderless = opts.borderless;
+    win.is_panel = use_panel;
+
+    // Configure panel-specific behavior.
+    if (use_panel) {
+        // Floating panels: always-on-top, does not hide on deactivate.
+        if (opts.kind == .floating) {
+            const FnLvl = fn (objc.id, objc.SEL, objc.NSInteger) callconv(.c) void;
+            const fn_lvl: *const FnLvl = @ptrCast(&objc.objc_msgSend);
+            fn_lvl(ns_win, objc.sel_registerName("setLevel:"), cocoa.NSFloatingWindowLevel);
+            objc.msgSend(void, ns_win, "setHidesOnDeactivate:", .{objc.NO});
+        }
+        // Popup panels: don't become key window (becomesKeyOnlyIfNeeded).
+        if (opts.kind == .popup) {
+            objc.msgSend(void, ns_win, "setBecomesKeyOnlyIfNeeded:", .{objc.YES});
+        }
+        // Floating panels: respond to keyboard without becoming key.
+        if (opts.kind == .floating) {
+            objc.msgSend(void, ns_win, "setFloatingPanel:", .{objc.YES});
+        }
+    }
 
     // Allow native fullscreen via the green title bar button / toggleFullScreen:.
-    const FnSetBehavior = fn (objc.id, objc.SEL, objc.NSUInteger) callconv(.c) void;
-    const fn_behav: *const FnSetBehavior = @ptrCast(&objc.objc_msgSend);
-    fn_behav(ns_win, objc.sel_registerName("setCollectionBehavior:"), cocoa.NSWindowCollectionBehaviorFullScreenPrimary);
+    // (Only for normal windows — panels don't support fullscreen.)
+    if (!use_panel) {
+        const FnSetBehavior = fn (objc.id, objc.SEL, objc.NSUInteger) callconv(.c) void;
+        const fn_behav: *const FnSetBehavior = @ptrCast(&objc.objc_msgSend);
+        fn_behav(ns_win, objc.sel_registerName("setCollectionBehavior:"), cocoa.NSWindowCollectionBehaviorFullScreenPrimary);
+    }
 
     objc.msgSend(void, ns_win, "setTitle:", .{objc.ns_string(title)});
 
@@ -1429,8 +1481,21 @@ pub fn init(title: [:0]const u8, w: i32, h: i32, opts: Options) !*Window {
     // Make the view first responder so key events route to it.
     objc.msgSend(void, ns_win, "makeFirstResponder:", .{ns_view});
 
-    // Show the window and activate the app.
-    objc.msgSend(void, ns_win, "makeKeyAndOrderFront:", .{@as(?objc.id, null)});
+    // Show the window. Dialogs are presented as sheets on the parent;
+    // other kinds are shown normally.
+    if (opts.kind == .dialog) {
+        if (opts.parent) |parent| {
+            // beginSheet:completionHandler: presents as a modal sheet.
+            const FnSheet = fn (objc.id, objc.SEL, objc.id, ?objc.id) callconv(.c) void;
+            const fn_sheet: *const FnSheet = @ptrCast(&objc.objc_msgSend);
+            fn_sheet(parent.ns_window, objc.sel_registerName("beginSheet:completionHandler:"), ns_win, null);
+        } else {
+            // Fallback: no parent, show as a normal window.
+            objc.msgSend(void, ns_win, "makeKeyAndOrderFront:", .{@as(?objc.id, null)});
+        }
+    } else {
+        objc.msgSend(void, ns_win, "makeKeyAndOrderFront:", .{@as(?objc.id, null)});
+    }
     objc.msgSend(void, g.app, "activateIgnoringOtherApps:", .{objc.YES});
 
     // Read back the actual window position from AppKit so win.x/win.y are

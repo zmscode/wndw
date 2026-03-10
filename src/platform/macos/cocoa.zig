@@ -18,6 +18,10 @@ pub const NSWindowStyleMaskResizable: usize = 1 << 3; // 0x0008
 pub const NSWindowStyleMaskFullScreen: usize = 1 << 14; // 0x4000
 pub const NSWindowStyleMaskFullSizeContentView: usize = 1 << 15; // 0x8000
 
+// ── NSPanel style masks ─────────────────────────────────────────────────────
+/// NSPanel-specific style bit: panel does not activate its app when clicked.
+pub const NSWindowStyleMaskNonactivatingPanel: usize = 1 << 7; // 0x0080
+
 // ── NSBackingStoreType ────────────────────────────────────────────────────────
 
 /// The standard backing store type — always use this for modern macOS.
