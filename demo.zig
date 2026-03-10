@@ -22,7 +22,7 @@ fn onCloseRequested() void {
 pub fn main() !void {
     var win = try wndw.init("wndw demo", 800, 600, .{
         .centred = true,
-        .resizeable = true,
+        .resizable = true,
         .inset_titlebar = true,
     });
     defer win.close();
@@ -52,15 +52,22 @@ pub fn main() !void {
     std.debug.print("  m → minimize            x → maximize\n", .{});
     std.debug.print("  r → read clipboard      w → write clipboard\n", .{});
     std.debug.print("  i → crosshair cursor    a → reset cursor\n", .{});
-    std.debug.print("  hold space → input state demo\n", .{});
 
     while (!win.shouldClose()) {
         while (win.poll()) |ev| {
             switch (ev) {
                 .key_pressed => |kp| {
-                    std.debug.print("key: {} mods: shift={} ctrl={} alt={} super={}\n", .{
-                        kp.key, kp.mods.shift, kp.mods.ctrl, kp.mods.alt, kp.mods.super,
-                    });
+                    if (kp.character) |ch| {
+                        var buf: [4]u8 = undefined;
+                        const len = std.unicode.utf8Encode(ch, &buf) catch 0;
+                        std.debug.print("key: {} char: '{s}' mods: shift={} ctrl={} alt={} super={}\n", .{
+                            kp.key, buf[0..len], kp.mods.shift, kp.mods.ctrl, kp.mods.alt, kp.mods.super,
+                        });
+                    } else {
+                        std.debug.print("key: {} mods: shift={} ctrl={} alt={} super={}\n", .{
+                            kp.key, kp.mods.shift, kp.mods.ctrl, kp.mods.alt, kp.mods.super,
+                        });
+                    }
                     switch (kp.key) {
                         .escape => win.quit(),
                         .t => win.setTitle("wndw — title changed!"),
@@ -115,15 +122,9 @@ pub fn main() !void {
                 .file_drop_left => std.debug.print("file drop left\n", .{}),
                 .close_requested => win.quit(),
                 .refresh_requested => {},
+                .text_input => |ti| std.debug.print("text: {s}\n", .{ti.text}),
+                .appearance_changed => |a| std.debug.print("appearance: {}\n", .{a}),
             }
         }
-
-        // Input state queries (Phase 10) — checked after all events are drained
-        // if (win.isKeyDown(.space)) {
-        //     std.debug.print("[input state] space held down\n", .{});
-        // }
-        // if (win.isMouseDown(.left)) {
-        //     std.debug.print("[input state] left mouse held\n", .{});
-        // }
     }
 }

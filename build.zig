@@ -40,6 +40,7 @@ pub fn build(b: *std.Build) void {
                 }
             }
             mod.linkFramework("Cocoa", .{});
+            mod.linkFramework("Carbon", .{});
         },
         // .windows => { mod.linkSystemLibrary("user32", .{}); ... },
         // .linux   => { mod.linkSystemLibrary("X11", .{}); ... },
@@ -58,10 +59,17 @@ pub fn build(b: *std.Build) void {
     // `zig build run` compiles and runs `demo.zig` by default.
     // `zig build run -- gl_demo` compiles and runs `gl_demo.zig`.
     // The demo file gets the wndw module as an import.
-    const demo_name = if (b.args) |args|
+    const raw_name: []const u8 = if (b.args) |args|
         if (args.len > 0) args[0] else "demo"
     else
         "demo";
+
+    // Reject path traversal: no slashes, backslashes, or ".." in the demo name.
+    for (raw_name) |c| {
+        if (c == '/' or c == '\\') @panic("demo name must not contain path separators");
+    }
+    if (std.mem.indexOf(u8, raw_name, "..") != null) @panic("demo name must not contain '..'");
+    const demo_name = raw_name;
 
     const demo_mod = b.createModule(.{
         .root_source_file = b.path(b.fmt("{s}.zig", .{demo_name})),

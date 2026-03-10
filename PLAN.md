@@ -16,22 +16,18 @@ Ordered by impact. Each feature follows TDD: write tests first, then implement.
 
 ---
 
-## 2. Keyboard Layout Awareness
+## ~~2. Keyboard Layout Awareness~~ DONE
 
-**Why second**: Current hardware-keycode-only approach silently breaks on non-QWERTY layouts. Affects every user with a non-US keyboard.
-
-**Tests**:
-- `UCKeyTranslate` resolves correct character for keycode + modifier state
-- Dead key sequences produce correct composed characters
-- Command shortcuts remap to QWERTY positions on non-Latin layouts
-- `TISCopyCurrentKeyboardLayoutInputSource` returns valid layout reference
-- Key events carry resolved character alongside hardware key
-
-**Implementation**:
-- Add `extern fn` declarations for `TISCopyCurrentKeyboardLayoutInputSource`, `TISGetInputSourceProperty`, `UCKeyTranslate` in `objc.zig`
-- Build character map on init and on `NSTextInputContextKeyboardSelectionDidChangeNotification`
-- Extend `KeyEvent` with optional `character: ?u21` field
-- Remap Cmd+key to QWERTY position for non-Latin layouts
+- `KeyEvent.character: ?u21` field (defaults to null, backward compatible)
+- `UCKeyTranslate` resolves Unicode codepoint per keycode + modifier state
+- `TISCopyCurrentKeyboardLayoutInputSource` queries active keyboard layout
+- `LMGetKbdType` gets physical keyboard type for accurate translation
+- Carbon.framework linked for UCKeyTranslate/TIS APIs
+- Dead keys suppressed via `kUCKeyTranslateNoDeadKeysMask`
+- Control characters filtered (< 0x20, 0x7F)
+- UTF-16 surrogate pair handling for characters > U+FFFF
+- Demo updated to print resolved character alongside key name
+- 8 tests in `keyboard_layout_test.zig`
 
 ---
 

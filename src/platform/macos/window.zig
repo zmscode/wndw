@@ -36,6 +36,43 @@ extern fn CFRelease(cf: *anyopaque) void;
 /// CoreFoundation string encoding constant for ASCII.
 const kCFStringEncodingASCII: u32 = 0x0600;
 
+// ── Carbon / UCKeyTranslate externs (for keyboard layout character resolution) ──
+
+/// Opaque type for keyboard layout data (UCKeyboardLayout*).
+const UCKeyboardLayout = anyopaque;
+
+/// Translate a virtual keycode + modifier state into a Unicode string
+/// using the current keyboard layout.
+extern fn UCKeyTranslate(
+    keyLayoutPtr: *const UCKeyboardLayout,
+    virtualKeyCode: u16,
+    keyAction: u16,
+    modifierKeyState: u32,
+    keyboardType: u32,
+    keyTranslateOptions: u32,
+    deadKeyState: *u32,
+    maxStringLength: usize,
+    actualStringLength: *usize,
+    unicodeString: [*]u16,
+) i32;
+
+/// Get the current keyboard input source.
+extern fn TISCopyCurrentKeyboardLayoutInputSource() ?*anyopaque;
+/// Get a property from an input source (returns CFData for "UCKeyboardLayout").
+extern fn TISGetInputSourceProperty(inputSource: *anyopaque, propertyKey: *anyopaque) ?*anyopaque;
+/// Get a pointer to the bytes inside a CFData object.
+extern fn CFDataGetBytePtr(data: *anyopaque) *const UCKeyboardLayout;
+/// The property key constant for the Unicode keyboard layout data.
+extern var kTISPropertyUnicodeKeyLayoutData: *anyopaque;
+
+/// kUCKeyActionDown
+const kUCKeyActionDown: u16 = 0;
+/// kUCKeyTranslateNoDeadKeysBit
+const kUCKeyTranslateNoDeadKeysMask: u32 = 1;
+
+/// Get the physical keyboard type via IOKit (LMGetKbdType equivalent).
+extern fn LMGetKbdType() u8;
+
 // ── Foundation global string constants ──────────────────────────────────────
 /// The actual `NSDefaultRunLoopMode` constant from Foundation. Using this
 /// instead of creating a string with `ns_string("kCFRunLoopDefaultMode")`
@@ -1496,12 +1533,20 @@ fn translate_event(win: *Window, ns_ev: objc.id, ev_type: usize) void {
             if (objc.msgSend(objc.BOOL, ns_ev, "isARepeat", .{}) != objc.NO) return;
             const kc = objc.msgSend(u16, ns_ev, "keyCode", .{});
             const flags = objc.msgSend(usize, ns_ev, "modifierFlags", .{});
-            win.queue.push(.{ .key_pressed = .{ .key = macos_keycode(kc), .mods = mods_from_flags(flags) } });
+            win.queue.push(.{ .key_pressed = .{
+                .key = macos_keycode(kc),
+                .mods = mods_from_flags(flags),
+                .character = resolve_character(kc, flags),
+            } });
         },
         cocoa.NSEventTypeKeyUp => {
             const kc = objc.msgSend(u16, ns_ev, "keyCode", .{});
             const flags = objc.msgSend(usize, ns_ev, "modifierFlags", .{});
-            win.queue.push(.{ .key_released = .{ .key = macos_keycode(kc), .mods = mods_from_flags(flags) } });
+            win.queue.push(.{ .key_released = .{
+                .key = macos_keycode(kc),
+                .mods = mods_from_flags(flags),
+                .character = resolve_character(kc, flags),
+            } });
         },
         cocoa.NSEventTypeFlagsChanged => {
             // Diff against prev_flags to determine press vs release.
@@ -1942,3 +1987,51 @@ fn view_unmark_text(_: objc.id, _: objc.SEL) callconv(.c) void {}
 // ── macOS hardware keycode → Key ──────────────────────────────────────────────
 
 const macos_keycode = @import("keymap.zig").macos_keycode;
+
+/// Resolve the Unicode character for a keycode + modifier flags using UCKeyTranslate.
+/// Returns null for non-character keys (function keys, modifiers, arrows, etc.)
+/// or if the keyboard layout cannot be queried.
+fn resolve_character(keycode: u16, flags: usize) ?u21 {
+    const input_source = TISCopyCurrentKeyboardLayoutInputSource() orelse return null;
+    defer CFRelease(input_source);
+    const layout_data = TISGetInputSourceProperty(input_source, kTISPropertyUnicodeKeyLayoutData) orelse return null;
+    const layout = CFDataGetBytePtr(layout_data);
+
+    // Convert NSEvent modifier flags to Carbon modifier bits (right-shifted by 8).
+    // Carbon expects: cmdKey=8, shiftKey=9, alphaLock=10, optionKey=11, controlKey=12
+    const carbon_mods: u32 = @truncate((flags >> 16) & 0xFF);
+
+    var dead_key_state: u32 = 0;
+    var length: usize = 0;
+    var chars: [4]u16 = undefined;
+
+    const status = UCKeyTranslate(
+        layout,
+        keycode,
+        kUCKeyActionDown,
+        carbon_mods,
+        @intCast(LMGetKbdType()),
+        kUCKeyTranslateNoDeadKeysMask,
+        &dead_key_state,
+        chars.len,
+        &length,
+        &chars,
+    );
+
+    if (status != 0 or length == 0) return null;
+
+    // Filter out control characters (< 0x20) except tab/return/etc which
+    // are already handled by Key enum and shouldn't be characters.
+    const ch = chars[0];
+    if (ch < 0x20 or ch == 0x7F) return null;
+
+    // Handle UTF-16 surrogate pairs for characters > U+FFFF
+    if (length >= 2 and ch >= 0xD800 and ch <= 0xDBFF) {
+        const lo = chars[1];
+        if (lo >= 0xDC00 and lo <= 0xDFFF) {
+            return @intCast((@as(u21, ch - 0xD800) << 10) + (lo - 0xDC00) + 0x10000);
+        }
+    }
+
+    return @intCast(ch);
+}

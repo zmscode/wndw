@@ -197,6 +197,10 @@ pub const Modifiers = struct {
 pub const KeyEvent = struct {
     key: Key,
     mods: Modifiers = .{},
+    /// The Unicode codepoint produced by this key with the current keyboard
+    /// layout and modifier state. `null` for non-character keys (modifiers,
+    /// function keys, arrows, etc.).
+    character: ?u21 = null,
 };
 
 // ── Payload types ─────────────────────────────────────────────────────────────
