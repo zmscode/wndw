@@ -1,22 +1,26 @@
 const std = @import("std");
 const wndw = @import("wndw");
 
-// ── Callbacks (Phase 11) ────────────────────────────────────────────────────
+// ── Callbacks ─────────────────────────────────────────────────────────────────
 
-fn onResize(size: wndw.Size) void {
+fn onResize(_: ?*anyopaque, size: wndw.Size) void {
     std.debug.print("[callback] resized: {}x{}\n", .{ size.w, size.h });
 }
 
-fn onFocusGained() void {
+fn onFocusGained(_: ?*anyopaque) void {
     std.debug.print("[callback] focus gained\n", .{});
 }
 
-fn onFocusLost() void {
+fn onFocusLost(_: ?*anyopaque) void {
     std.debug.print("[callback] focus lost\n", .{});
 }
 
-fn onCloseRequested() void {
+fn onCloseRequested(_: ?*anyopaque) void {
     std.debug.print("[callback] close requested\n", .{});
+}
+
+fn onAppearanceChanged(_: ?*anyopaque, appearance: wndw.Appearance) void {
+    std.debug.print("[callback] appearance changed: {}\n", .{appearance});
 }
 
 pub fn main() !void {
@@ -31,29 +35,57 @@ pub fn main() !void {
     win.setMinSize(400, 300);
     win.setMaxSize(1920, 1080);
 
-    // Register callbacks (Phase 11)
-    win.setOnResize(onResize);
-    win.setOnFocusGained(onFocusGained);
-    win.setOnFocusLost(onFocusLost);
-    win.setOnCloseRequested(onCloseRequested);
+    // Register callbacks (with context pointer — pass null when unused)
+    win.setOnResize(null, onResize);
+    win.setOnFocusGained(null, onFocusGained);
+    win.setOnFocusLost(null, onFocusLost);
+    win.setOnCloseRequested(null, onCloseRequested);
+    win.setOnAppearanceChanged(null, onAppearanceChanged);
 
     // Monitor info
     const mon = win.getPrimaryMonitor();
     std.debug.print("primary monitor: {}x{} @ ({},{}) scale={d:.1}\n", .{ mon.w, mon.h, mon.x, mon.y, mon.scale });
 
+    // Current appearance
+    const appearance = win.getAppearance();
+    std.debug.print("appearance: {}\n", .{appearance});
+
+    // CVDisplayLink frame sync
+    win.createDisplayLink() catch |err| {
+        std.debug.print("display link unavailable: {}\n", .{err});
+    };
+    defer win.destroyDisplayLink();
+
     // Enable drag-and-drop
     win.setDragAndDrop(true);
 
+    // Track child windows so we can close them on exit
+    var floating_win: ?*wndw.Window = null;
+    var popup_win: ?*wndw.Window = null;
+    var dialog_win: ?*wndw.Window = null;
+
+    defer {
+        if (dialog_win) |d| d.close();
+        if (popup_win) |p| p.close();
+        if (floating_win) |fl| fl.close();
+    }
+
     std.debug.print("wndw demo running — press keys to interact:\n", .{});
-    std.debug.print("  escape  → quit          t → change title\n", .{});
+    std.debug.print("  escape → quit           t → change title\n", .{});
     std.debug.print("  c → center              f → toggle fullscreen\n", .{});
     std.debug.print("  h → hide cursor         s → show cursor\n", .{});
-    std.debug.print("  o → 50%% opacity        p → full opacity\n", .{});
+    std.debug.print("  o → 25%% opacity        p → full opacity\n", .{});
     std.debug.print("  m → minimize            x → maximize\n", .{});
     std.debug.print("  r → read clipboard      w → write clipboard\n", .{});
     std.debug.print("  i → crosshair cursor    a → reset cursor\n", .{});
+    std.debug.print("  d → toggle dark/light   l → follow system appearance\n", .{});
+    std.debug.print("  1 → floating window     2 → popup window\n", .{});
+    std.debug.print("  3 → dialog (sheet)      0 → close child windows\n", .{});
 
     while (!win.shouldClose()) {
+        // Sync to display refresh rate
+        win.waitForFrame();
+
         while (win.poll()) |ev| {
             switch (ev) {
                 .key_pressed => |kp| {
@@ -89,6 +121,80 @@ pub fn main() !void {
                         .w => win.clipboardWrite("hello from wndw!"),
                         .i => win.setStandardCursor(.closed_hand),
                         .a => win.resetCursor(),
+
+                        // Appearance
+                        .d => {
+                            const current = win.getAppearance();
+                            const target: wndw.Appearance = if (current == .dark) .light else .dark;
+                            win.setAppearance(target);
+                            std.debug.print("appearance → {}\n", .{target});
+                        },
+                        .l => {
+                            win.setAppearance(null);
+                            std.debug.print("appearance → follow system\n", .{});
+                        },
+
+                        // Window kinds
+                        .@"1" => {
+                            if (floating_win == null) {
+                                floating_win = wndw.init("floating palette", 300, 200, .{
+                                    .centred = true,
+                                    .resizable = true,
+                                    .kind = .floating,
+                                }) catch |err| blk: {
+                                    std.debug.print("failed to create floating window: {}\n", .{err});
+                                    break :blk null;
+                                };
+                                if (floating_win != null) std.debug.print("created floating window\n", .{});
+                            } else {
+                                std.debug.print("floating window already open\n", .{});
+                            }
+                        },
+                        .@"2" => {
+                            if (popup_win == null) {
+                                popup_win = wndw.init("popup", 250, 150, .{
+                                    .kind = .popup,
+                                }) catch |err| blk: {
+                                    std.debug.print("failed to create popup window: {}\n", .{err});
+                                    break :blk null;
+                                };
+                                if (popup_win != null) std.debug.print("created popup window\n", .{});
+                            } else {
+                                std.debug.print("popup window already open\n", .{});
+                            }
+                        },
+                        .@"3" => {
+                            if (dialog_win == null) {
+                                dialog_win = wndw.init("dialog sheet", 400, 200, .{
+                                    .kind = .dialog,
+                                    .parent = win,
+                                }) catch |err| blk: {
+                                    std.debug.print("failed to create dialog: {}\n", .{err});
+                                    break :blk null;
+                                };
+                                if (dialog_win != null) std.debug.print("created dialog sheet\n", .{});
+                            } else {
+                                std.debug.print("dialog already open\n", .{});
+                            }
+                        },
+                        .@"0" => {
+                            if (dialog_win) |d| {
+                                d.close();
+                                dialog_win = null;
+                                std.debug.print("closed dialog\n", .{});
+                            }
+                            if (popup_win) |p| {
+                                p.close();
+                                popup_win = null;
+                                std.debug.print("closed popup\n", .{});
+                            }
+                            if (floating_win) |fl| {
+                                fl.close();
+                                floating_win = null;
+                                std.debug.print("closed floating\n", .{});
+                            }
+                        },
+
                         else => {},
                     }
                 },

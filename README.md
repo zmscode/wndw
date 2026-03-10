@@ -1,6 +1,6 @@
 # wndw
 
-A pure Zig windowing library. No C dependencies, no generated bindings -- platform APIs are called directly via Zig's `extern fn` declarations.
+A pure Zig windowing library. No C dependencies, no generated bindings — platform APIs are called directly via Zig's `extern fn` declarations.
 
 Currently supports **macOS** (Cocoa/AppKit via the ObjC runtime). Windows and Linux backends are planned.
 
@@ -19,6 +19,7 @@ pub fn main() !void {
         while (win.poll()) |ev| {
             switch (ev) {
                 .key_pressed => |kp| if (kp.key == .escape) win.quit(),
+                .close_requested => win.quit(),
                 else => {},
             }
         }
@@ -46,47 +47,110 @@ const wndw_dep = b.dependency("wndw", .{
 exe.root_module.addImport("wndw", wndw_dep.module("wndw"));
 ```
 
-## API
+## Features
 
 ### Window Creation
 
 ```zig
 var win = try wndw.init("title", 800, 600, .{
-    .centred = true,       // centre on screen
-    .resizeable = true,    // allow user resizing
-    .borderless = false,   // window decorations (title bar, border)
-    .transparent = false,  // per-pixel transparency
+    .centred = true,
+    .resizable = true,
+    .borderless = false,
+    .transparent = false,
+    .inset_titlebar = true,   // transparent titlebar, content behind traffic lights
+    .kind = .normal,          // .normal, .floating, .popup, or .dialog
+    .parent = null,           // required for .dialog (sheet attachment)
 });
 defer win.close();
 ```
 
+**Window kinds** control the underlying Cocoa class and focus behavior:
+
+| Kind | Behavior |
+|------|----------|
+| `.normal` | Standard `NSWindow` — appears in window list, receives key and main status |
+| `.floating` | `NSPanel` at floating level — stays above normal windows (tool palettes) |
+| `.popup` | `NSPanel` that doesn't become key — tooltips, autocomplete, transient UI |
+| `.dialog` | `NSPanel` presented as a sheet attached to `parent` — blocks parent until dismissed |
+
 ### Event Loop
 
-`win.poll()` returns the next event, or `null` when the queue is empty. OS events are drained lazily -- only when the Zig-side queue runs out.
+`win.poll()` returns the next event, or `null` when the queue is empty.
 
 ```zig
 while (win.poll()) |ev| {
     switch (ev) {
-        .key_pressed => |kp| { _ = kp.key; _ = kp.mods; },
+        .key_pressed => |kp| { _ = kp.key; _ = kp.mods; _ = kp.character; },
         .key_released => |kr| { _ = kr.key; _ = kr.mods; },
-        .mouse_pressed => |btn| { },
-        .mouse_released => |btn| { },
+        .mouse_pressed => |btn| {},
+        .mouse_released => |btn| {},
         .mouse_moved => |m| { _ = m.x; _ = m.y; },
         .scroll => |s| { _ = s.dx; _ = s.dy; },
         .resized => |r| { _ = r.w; _ = r.h; },
         .moved => |m| { _ = m.x; _ = m.y; },
-        .focus_gained => {},
-        .focus_lost => {},
+        .focus_gained, .focus_lost => {},
         .close_requested => {},
-        .minimized => {},
-        .restored => {},
-        .mouse_entered => {},
-        .mouse_left => {},
-        .maximized => {},
+        .minimized, .restored, .maximized => {},
+        .mouse_entered, .mouse_left => {},
         .refresh_requested => {},
         .scale_changed => |s| { _ = s; },
+        .text_input => |ti| { _ = ti.text; },
+        .appearance_changed => |a| { _ = a; },  // .light or .dark
+        .file_drop_started, .file_drop_left => {},
+        .file_dropped => |count| { _ = count; },
     }
 }
+```
+
+### Keyboard Layout Awareness
+
+Key events include a `character` field with the translated Unicode codepoint (via `UCKeyTranslate`), so you get layout-correct characters regardless of hardware keycode:
+
+```zig
+.key_pressed => |kp| {
+    if (kp.character) |ch| {
+        // ch is a u21 Unicode codepoint from the active keyboard layout
+    }
+},
+```
+
+### Dark/Light Mode Tracking
+
+Query the current appearance or react to system changes:
+
+```zig
+const appearance = win.getAppearance(); // .light or .dark
+
+// Or via events:
+.appearance_changed => |a| std.debug.print("switched to {}\n", .{a}),
+```
+
+### CVDisplayLink Frame Sync
+
+Sync your render loop to the display's refresh rate:
+
+```zig
+try win.createDisplayLink();
+defer win.destroyDisplayLink();
+
+while (!win.shouldClose()) {
+    win.waitForFrame();  // blocks until next vsync
+    while (win.poll()) |ev| { ... }
+    // render here
+}
+```
+
+### Callbacks with Context Pointers
+
+All callbacks accept a `?*anyopaque` context pointer, passed through to each invocation:
+
+```zig
+fn onResize(ctx: ?*anyopaque, size: wndw.Size) void {
+    const app: *App = @ptrCast(@alignCast(ctx.?));
+    app.handleResize(size);
+}
+
+win.setOnResize(app, onResize);
 ```
 
 ### Window Control
@@ -95,59 +159,68 @@ while (win.poll()) |ev| {
 win.setTitle("new title");
 win.resize(1024, 768);
 win.move(100, 200);
+win.center();
 win.minimize();
 win.restore();
 win.maximize();
 win.setFullscreen(true);
+win.setOpacity(0.5);
+win.setMinSize(400, 300);
+win.setMaxSize(1920, 1080);
 win.setCursorVisible(false);
+win.setStandardCursor(.crosshair);  // .arrow, .ibeam, .pointing_hand, etc.
+win.resetCursor();
 win.setAlwaysOnTop(true);
+win.setDragAndDrop(true);
+win.clipboardWrite("text");
+const text = win.clipboardRead();
 ```
+
+### OpenGL
+
+```zig
+try win.createGLContext(.{});  // defaults: OpenGL 3.2 Core, depth=24, double-buffered
+defer win.deleteContext();
+win.setSwapInterval(1);
+
+const glClear = @as(*const fn (u32) callconv(.c) void,
+    @ptrCast(@alignCast(win.getProcAddress("glClear").?)));
+```
+
+See `gl_demo.zig` for a full animated example.
 
 ### Window State
 
 ```zig
 const focused = win.isFocused();
 const minimized = win.isMinimized();
+const fullscreen = win.isFullscreen();
 const size = win.getSize();   // .w, .h
 const pos = win.getPos();     // .x, .y
 const closing = win.shouldClose();
 ```
-
-### Types
-
-**`Key`** -- all keyboard keys: letters (`a`-`z`), digits (`@"0"`-`@"9"`), function keys (`f1`-`f20`), navigation (`left`, `right`, `up`, `down`, `home`, `end`, `page_up`, `page_down`), editing (`enter`, `escape`, `backspace`, `delete`, `tab`, `space`, `insert`), modifiers (`left_shift`, `right_shift`, `left_ctrl`, `right_ctrl`, `left_alt`, `right_alt`, `left_super`, `right_super`, `caps_lock`), punctuation (`minus`, `equal`, `left_bracket`, `right_bracket`, `backslash`, `semicolon`, `apostrophe`, `grave`, `comma`, `period`, `slash`), numpad (`kp_0`-`kp_9`, `kp_decimal`, `kp_divide`, `kp_multiply`, `kp_subtract`, `kp_add`, `kp_enter`, `kp_equal`), and `unknown`.
-
-**`MouseButton`** -- `left`, `right`, `middle`, `x1`, `x2`.
-
-**`Event`** -- tagged union with 13 variants (see event loop example above).
 
 ## Architecture
 
 ```
 src/
   root.zig                  -- public API, comptime platform dispatch
-  event.zig                 -- shared Event union, Key enum, MouseButton enum
+  event.zig                 -- Event union, Key, MouseButton, Cursor, Appearance
   event_queue.zig           -- fixed-capacity circular buffer (128 events)
-  tests.zig                 -- test runner (module root for src/tests/)
-  tests/
-    event_queue_test.zig    -- FIFO, overflow, wrap-around tests
-    keymap_test.zig         -- all 128 macOS hardware keycodes
-    api_test.zig            -- compile-time API surface tests
-    event_types_test.zig    -- minimized/restored event tag tests
-    window_methods_test.zig -- Window state fields and method existence
   platform/
     macos/
       objc.zig              -- ObjC runtime extern declarations + msgSend helper
       cocoa.zig             -- numeric Cocoa/AppKit constants (stable ABI values)
-      window.zig            -- NSApp setup, NSWindow/NSView subclasses, event loop
-      keymap.zig            -- 128-entry hardware keycode -> Key lookup table
+      window.zig            -- NSApp, NSWindow/NSPanel, NSView, event loop, callbacks
+      keymap.zig            -- hardware keycode -> Key lookup table
+demo.zig                    -- interactive feature demo
+gl_demo.zig                 -- OpenGL animated background demo
 build.zig
-demo.zig
 ```
 
-Platform dispatch is comptime -- `src/root.zig` selects the backend based on `builtin.os.tag`. Adding a new platform is one new file plus one `switch` branch.
+Platform dispatch is comptime — `src/root.zig` selects the backend based on `builtin.os.tag`. Adding a new platform means one new directory plus one `switch` branch.
 
-The ObjC runtime is accessed purely through `extern fn` declarations (`objc_msgSend`, `objc_getClass`, etc.). No `@cImport`, no C source files, no SDK headers. Linking `-framework Cocoa` is the only requirement.
+The ObjC runtime is accessed purely through `extern fn` declarations (`objc_msgSend`, `objc_getClass`, etc.). No `@cImport`, no C source files, no SDK headers required.
 
 ## Testing
 

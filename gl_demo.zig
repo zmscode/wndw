@@ -4,7 +4,8 @@ const wndw = @import("wndw");
 pub fn main() !void {
     var win = try wndw.init("wndw OpenGL demo", 800, 600, .{
         .centred = true,
-        .resizeable = true,
+        .resizable = true,
+        .inset_titlebar = true,
     });
     defer win.close();
 
@@ -26,6 +27,7 @@ pub fn main() !void {
     const GL_VENDOR = 0x1F00;
     const GL_RENDERER = 0x1F01;
     const GL_VERSION = 0x1F02;
+
     if (glGetString(GL_VENDOR)) |s| std.debug.print("GL vendor:   {s}\n", .{s});
     if (glGetString(GL_RENDERER)) |s| std.debug.print("GL renderer: {s}\n", .{s});
     if (glGetString(GL_VERSION)) |s| std.debug.print("GL version:  {s}\n", .{s});
@@ -33,13 +35,15 @@ pub fn main() !void {
     const GL_COLOR_BUFFER_BIT = 0x00004000;
     var hue: f32 = 0.0;
 
-    std.debug.print("wndw OpenGL demo — escape to quit\n", .{});
-
     while (!win.shouldClose()) {
         while (win.poll()) |ev| {
             switch (ev) {
                 .key_pressed => |kp| {
                     if (kp.key == .escape) win.quit();
+                    if (kp.key == .o) win.setOpacity(0.25);
+                    if (kp.key == .p) win.setOpacity(1.0);
+                    if (kp.key == .m) win.minimize();
+                    if (kp.key == .x) win.maximize();
                 },
                 .close_requested => win.quit(),
                 else => {},

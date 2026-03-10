@@ -295,6 +295,8 @@ pub const Window = struct {
     /// Cursor visibility state (tracked locally since NSCursor hide/unhide
     /// is a global counter, not per-window).
     is_cursor_visible: bool = true,
+    /// Per-window appearance override (null = follow system).
+    appearance_override: ?event.Appearance = null,
     /// Saved style mask for borderless minimize: restored in the
     /// `windowDidMiniaturize:` delegate after the animation finishes.
     saved_style_mask: ?usize = null,
@@ -841,10 +843,24 @@ pub const Window = struct {
         return win.is_cursor_visible;
     }
 
-    /// Query the current system appearance (light or dark mode).
-    /// On macOS this inspects `[NSApp effectiveAppearance].name`.
-    pub fn getAppearance(_: *const Window) event.Appearance {
-        return query_system_appearance();
+    /// Query this window's effective appearance (light or dark mode).
+    /// Returns the per-window override if set, otherwise the system appearance.
+    pub fn getAppearance(win: *const Window) event.Appearance {
+        return win.appearance_override orelse query_system_appearance();
+    }
+
+    /// Override this window's appearance to light or dark mode, independent
+    /// of the system setting. Pass `null` to follow the system appearance.
+    pub fn setAppearance(win: *Window, appearance: ?event.Appearance) void {
+        win.appearance_override = appearance;
+        const ns_appearance: ?objc.id = if (appearance) |a| blk: {
+            const name = switch (a) {
+                .light => objc.ns_string("NSAppearanceNameAqua"),
+                .dark => objc.ns_string("NSAppearanceNameDarkAqua"),
+            };
+            break :blk objc.msgSend(objc.id, objc.ns_class("NSAppearance"), "appearanceNamed:", .{name});
+        } else null;
+        objc.msgSend(void, win.ns_window, "setAppearance:", .{ns_appearance});
     }
 
     /// Set the window to float above all other windows (always-on-top) or
@@ -1387,7 +1403,7 @@ pub const Window = struct {
     /// timer thread may still be accessing it (same pattern as GPUI).
     pub fn destroyDisplayLink(win: *Window) void {
         if (win.display_link) |dl| {
-            CVDisplayLinkStop(dl);
+            _ = CVDisplayLinkStop(dl);
             win.display_link = null;
         }
     }
