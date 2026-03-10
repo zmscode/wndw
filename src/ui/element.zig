@@ -297,9 +297,10 @@ pub const Div = struct {
         const final_content_main = if (is_row) @max(w - pad_h, 0) else @max(h - pad_v, 0);
         const final_content_cross = if (is_row) @max(h - pad_v, 0) else @max(w - pad_h, 0);
 
-        // ── 6. flex_grow distribution ───────────────────────────────
+        // ── 6. flex_grow / flex_shrink distribution ────────────────
         const available = final_content_main - total_main - gap_total;
         if (available > 0 and total_grow > 0) {
+            // Positive space → distribute to flex_grow children
             for (self.children_list.items, 0..) |ch, i| {
                 if (ch.flex_grow > 0) {
                     const extra = available * (ch.flex_grow / total_grow);
@@ -307,6 +308,25 @@ pub const Div = struct {
                         child_sizes[i].w += extra;
                     } else {
                         child_sizes[i].h += extra;
+                    }
+                }
+            }
+        } else if (available < 0) {
+            // Overflow → shrink children proportional to flex_shrink * size
+            const deficit = -available;
+            var total_shrink_basis: f32 = 0;
+            for (self.children_list.items, 0..) |ch, i| {
+                const child_main_sz = if (is_row) child_sizes[i].w else child_sizes[i].h;
+                total_shrink_basis += ch.flex_shrink * child_main_sz;
+            }
+            if (total_shrink_basis > 0) {
+                for (self.children_list.items, 0..) |ch, i| {
+                    const child_main_sz = if (is_row) child_sizes[i].w else child_sizes[i].h;
+                    const shrink_amount = deficit * (ch.flex_shrink * child_main_sz) / total_shrink_basis;
+                    if (is_row) {
+                        child_sizes[i].w = @max(child_sizes[i].w - shrink_amount, 0);
+                    } else {
+                        child_sizes[i].h = @max(child_sizes[i].h - shrink_amount, 0);
                     }
                 }
             }
@@ -426,6 +446,9 @@ pub const Div = struct {
         // Paint children using positions computed during layout
         const content = bounds.inset(s.padding);
 
+        // Clip children to content area so they don't overflow
+        px.pushClip(content);
+
         for (self.children_list.items, 0..) |ch, i| {
             const cl = if (i < self.child_layouts.items.len)
                 self.child_layouts.items[i]
@@ -439,6 +462,8 @@ pub const Div = struct {
                 .h = cl.h,
             });
         }
+
+        px.popClip();
     }
 };
 

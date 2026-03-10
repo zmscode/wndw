@@ -663,6 +663,75 @@ test "nested flex containers" {
     try testing.expectApproxEqAbs(@as(f32, 30), px.draw_list.quads.items[2].bounds[1], 0.1); // b2 y
 }
 
+test "flex_shrink shrinks children when overflowing" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var px = ui.PaintContext.init(testing.allocator);
+    defer px.deinit();
+
+    // Two 100px children in a 120px container → 80px overflow
+    // Default flex_shrink=1, so each shrinks proportionally by size
+    // Each has same size, so each shrinks by 40 → 60px each
+    const c1 = ui.div(alloc).bg(ui.Color.hex(0xFF0000)).width(100).into_element();
+    const c2 = ui.div(alloc).bg(ui.Color.hex(0x00FF00)).width(100).into_element();
+
+    const row = ui.div(alloc).flex_row().child(c1).child(c2).into_element();
+    _ = row.doLayout(ui.Constraints.tight(120, 100));
+    row.paint(&px, .{ .x = 0, .y = 0, .w = 120, .h = 100 });
+
+    try testing.expectApproxEqAbs(@as(f32, 60), px.draw_list.quads.items[0].bounds[2], 0.1);
+    try testing.expectApproxEqAbs(@as(f32, 60), px.draw_list.quads.items[1].bounds[2], 0.1);
+    try testing.expectApproxEqAbs(@as(f32, 60), px.draw_list.quads.items[1].bounds[0], 0.1);
+}
+
+test "flex_shrink proportional to size" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var px = ui.PaintContext.init(testing.allocator);
+    defer px.deinit();
+
+    // 200px + 100px = 300px in 240px container → 60px overflow
+    // shrink_basis: 200*1=200, 100*1=100, total=300
+    // big shrinks by 60*(200/300) = 40 → 160px
+    // small shrinks by 60*(100/300) = 20 → 80px
+    const big = ui.div(alloc).bg(ui.Color.hex(0xFF0000)).width(200).into_element();
+    const small = ui.div(alloc).bg(ui.Color.hex(0x00FF00)).width(100).into_element();
+
+    const row = ui.div(alloc).flex_row().child(big).child(small).into_element();
+    _ = row.doLayout(ui.Constraints.tight(240, 100));
+    row.paint(&px, .{ .x = 0, .y = 0, .w = 240, .h = 100 });
+
+    try testing.expectApproxEqAbs(@as(f32, 160), px.draw_list.quads.items[0].bounds[2], 0.1);
+    try testing.expectApproxEqAbs(@as(f32, 80), px.draw_list.quads.items[1].bounds[2], 0.1);
+}
+
+test "flex_shrink with gap accounts for gap in overflow" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var px = ui.PaintContext.init(testing.allocator);
+    defer px.deinit();
+
+    // Two 100px children + 20px gap = 220px in 180px container → 40px overflow
+    // Each shrinks by 20 → 80px each
+    const c1 = ui.div(alloc).bg(ui.Color.hex(0xFF0000)).width(100).into_element();
+    const c2 = ui.div(alloc).bg(ui.Color.hex(0x00FF00)).width(100).into_element();
+
+    const row = ui.div(alloc).flex_row().gap(20).child(c1).child(c2).into_element();
+    _ = row.doLayout(ui.Constraints.tight(180, 100));
+    row.paint(&px, .{ .x = 0, .y = 0, .w = 180, .h = 100 });
+
+    try testing.expectApproxEqAbs(@as(f32, 80), px.draw_list.quads.items[0].bounds[2], 0.1);
+    try testing.expectApproxEqAbs(@as(f32, 80), px.draw_list.quads.items[1].bounds[2], 0.1);
+    // Second child at 80 + 20 gap = 100
+    try testing.expectApproxEqAbs(@as(f32, 100), px.draw_list.quads.items[1].bounds[0], 0.1);
+}
+
 // ── WindowContext tests ─────────────────────────────────────────────
 
 test "WindowContext init and deinit" {

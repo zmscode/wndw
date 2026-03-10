@@ -20,7 +20,12 @@ pub const PaintContext = struct {
     }
 
     pub fn pushQuad(self: *PaintContext, q: QuadCmd) void {
-        self.draw_list.pushQuad(self.alloc, q);
+        var quad = q;
+        // Auto-assign clip from current clip stack if quad has no explicit clip
+        if (quad.clip_index < 0 and self.clip_stack.items.len > 0) {
+            quad.clip_index = self.currentClipIndex();
+        }
+        self.draw_list.pushQuad(self.alloc, quad);
     }
 
     pub fn pushClip(self: *PaintContext, rect: layout.Rect) void {
