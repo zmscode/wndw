@@ -42,24 +42,15 @@ Ordered by impact. Each feature follows TDD: write tests first, then implement.
 
 ---
 
-## 4. CVDisplayLink Frame Sync
+## ~~4. CVDisplayLink Frame Sync~~ DONE
 
-**Why fourth**: Proper vsync eliminates tearing and busy-waiting. Required for smooth rendering.
-
-**Tests**:
-- Display link can be created and destroyed without crash
-- Callback fires at approximately display refresh rate
-- Display link pauses when window is not visible
-- Display link resumes on restore/show
-- Multiple windows each get independent display links
-
-**Implementation**:
-- Add `extern fn` declarations for `CVDisplayLinkCreateWithActiveCGDisplays`, `CVDisplayLinkSetOutputCallback`, `CVDisplayLinkStart/Stop`, `CVDisplayLinkRelease`
-- Create display link during window init
-- Route callback through `dispatch_source` (GCD) to main thread
-- Add `.frame_ready` event (or expose as `win.waitForVSync()`)
-- Pause/resume on minimize/restore and hide/show
-- Intentionally leak on teardown (GPUI pattern — avoids background thread segfault)
+- `win.createDisplayLink()` creates and starts a CVDisplayLink
+- `win.waitForFrame()` blocks (spin-waits) until the next vsync
+- `win.destroyDisplayLink()` stops the link (auto-called by `close()`)
+- Background thread callback sets atomic `frame_ready` flag
+- Intentional leak on teardown (no CVDisplayLinkRelease — avoids bg thread segfault)
+- CoreVideo.framework linked in build.zig
+- 6 tests in `display_link_test.zig`
 
 ---
 

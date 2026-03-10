@@ -41,6 +41,7 @@ pub fn build(b: *std.Build) void {
             }
             mod.linkFramework("Cocoa", .{});
             mod.linkFramework("Carbon", .{});
+            mod.linkFramework("CoreVideo", .{});
         },
         // .windows => { mod.linkSystemLibrary("user32", .{}); ... },
         // .linux   => { mod.linkSystemLibrary("X11", .{}); ... },

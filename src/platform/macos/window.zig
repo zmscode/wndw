@@ -73,6 +73,27 @@ const kUCKeyTranslateNoDeadKeysMask: u32 = 1;
 /// Get the physical keyboard type via IOKit (LMGetKbdType equivalent).
 extern fn LMGetKbdType() u8;
 
+// ── CoreVideo / CVDisplayLink externs ────────────────────────────────────────
+
+/// CVDisplayLink opaque type.
+const CVDisplayLinkRef = *anyopaque;
+
+/// Callback signature for CVDisplayLink output.
+const CVDisplayLinkOutputCallback = *const fn (
+    displayLink: CVDisplayLinkRef,
+    inNow: *const anyopaque,
+    inOutputTime: *const anyopaque,
+    flagsIn: u64,
+    flagsOut: *u64,
+    userInfo: ?*anyopaque,
+) callconv(.c) i32;
+
+extern fn CVDisplayLinkCreateWithActiveCGDisplays(linkOut: *?CVDisplayLinkRef) i32;
+extern fn CVDisplayLinkSetOutputCallback(link: CVDisplayLinkRef, callback: CVDisplayLinkOutputCallback, userInfo: ?*anyopaque) i32;
+extern fn CVDisplayLinkStart(link: CVDisplayLinkRef) i32;
+extern fn CVDisplayLinkStop(link: CVDisplayLinkRef) i32;
+extern fn CVDisplayLinkRelease(link: CVDisplayLinkRef) void;
+
 // ── Foundation global string constants ──────────────────────────────────────
 /// The actual `NSDefaultRunLoopMode` constant from Foundation. Using this
 /// instead of creating a string with `ns_string("kCFRunLoopDefaultMode")`
@@ -295,6 +316,10 @@ pub const Window = struct {
     /// NSOpenGLContext and NSOpenGLPixelFormat (null until `createGLContext` is called).
     gl_context: ?objc.id = null,
     gl_format: ?objc.id = null,
+    /// CVDisplayLink handle (null until `createDisplayLink` is called).
+    display_link: ?*anyopaque = null,
+    /// Atomic flag set by the CVDisplayLink callback on vsync, cleared by `waitForFrame`.
+    frame_ready: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
     /// OpenGL function pointer type with the alignment that zgl expects.
     /// Matches `zgl.binding.FunctionPointer` so `glGetProcAddress` can be
@@ -566,6 +591,7 @@ pub const Window = struct {
     /// prevent stale callbacks from firing after the Window struct is freed.
     pub fn close(win: *Window) void {
         unregister_live_window(win);
+        win.destroyDisplayLink();
         win.deleteContext();
         win.releaseDropStrings();
         objc.msgSend(void, win.ns_window, "setDelegate:", .{@as(?objc.id, null)});
@@ -1332,6 +1358,49 @@ pub const Window = struct {
         const raw = win.getProcAddress(name.ptr) orelse return null;
         return @ptrCast(@alignCast(raw));
     }
+
+    // ── CVDisplayLink ────────────────────────────────────────────────────────
+
+    /// Create and start a CVDisplayLink for this window. The display link
+    /// fires on every vsync and sets `frame_ready` to `true`. Call
+    /// `waitForFrame()` in your render loop to block until the next vsync.
+    ///
+    /// Only one display link per window. Calling again is a no-op.
+    pub fn createDisplayLink(win: *Window) !void {
+        if (win.display_link != null) return;
+        var link: ?CVDisplayLinkRef = null;
+        if (CVDisplayLinkCreateWithActiveCGDisplays(&link) != 0) return error.DisplayLinkFailed;
+        const dl = link orelse return error.DisplayLinkFailed;
+        if (CVDisplayLinkSetOutputCallback(dl, &display_link_callback, win) != 0) {
+            CVDisplayLinkRelease(dl);
+            return error.DisplayLinkFailed;
+        }
+        if (CVDisplayLinkStart(dl) != 0) {
+            CVDisplayLinkRelease(dl);
+            return error.DisplayLinkFailed;
+        }
+        win.display_link = dl;
+    }
+
+    /// Stop the CVDisplayLink. Safe to call if none exists.
+    /// Note: intentionally does not call CVDisplayLinkRelease — the background
+    /// timer thread may still be accessing it (same pattern as GPUI).
+    pub fn destroyDisplayLink(win: *Window) void {
+        if (win.display_link) |dl| {
+            CVDisplayLinkStop(dl);
+            win.display_link = null;
+        }
+    }
+
+    /// Block until the next vsync (display link fires). Returns immediately
+    /// if no display link is active. Clears the `frame_ready` flag.
+    pub fn waitForFrame(win: *Window) void {
+        if (win.display_link == null) return;
+        while (!win.frame_ready.load(.acquire)) {
+            std.atomic.spinLoopHint();
+        }
+        win.frame_ready.store(false, .release);
+    }
 };
 
 // ── init ──────────────────────────────────────────────────────────────────────
@@ -2014,6 +2083,23 @@ fn view_unmark_text(_: objc.id, _: objc.SEL) callconv(.c) void {}
 // ── macOS hardware keycode → Key ──────────────────────────────────────────────
 
 const macos_keycode = @import("keymap.zig").macos_keycode;
+
+// ── CVDisplayLink callback ───────────────────────────────────────────────────
+
+/// Called on a background CoreVideo thread at each vsync. Sets the
+/// atomic `frame_ready` flag so the main thread can unblock.
+fn display_link_callback(
+    _: CVDisplayLinkRef,
+    _: *const anyopaque,
+    _: *const anyopaque,
+    _: u64,
+    _: *u64,
+    userInfo: ?*anyopaque,
+) callconv(.c) i32 {
+    const win: *Window = @ptrCast(@alignCast(userInfo.?));
+    win.frame_ready.store(true, .release);
+    return 0; // kCVReturnSuccess
+}
 
 /// Resolve the Unicode character for a keycode + modifier flags using UCKeyTranslate.
 /// Returns null for non-character keys (function keys, modifiers, arrows, etc.)

@@ -19,4 +19,5 @@ comptime {
     _ = @import("tests/keyboard_layout_test.zig");
     _ = @import("tests/callback_context_test.zig");
     _ = @import("tests/window_kind_test.zig");
+    _ = @import("tests/display_link_test.zig");
 }
