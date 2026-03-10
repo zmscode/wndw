@@ -10,7 +10,6 @@
 
 // ── NSWindowStyleMask ─────────────────────────────────────────────────────────
 /// Bitmask values for `[NSWindow styleMask]`. Combine with `|`.
-
 pub const NSWindowStyleMaskBorderless: usize = 0;
 pub const NSWindowStyleMaskTitled: usize = 1 << 0; // 0x0001
 pub const NSWindowStyleMaskClosable: usize = 1 << 1; // 0x0002
@@ -40,7 +39,6 @@ pub const NSEventMaskAny: usize = ~@as(usize, 0);
 
 // ── NSEventType ───────────────────────────────────────────────────────────────
 /// Numeric values for `[NSEvent type]`.
-
 pub const NSEventTypeLeftMouseDown: usize = 1;
 pub const NSEventTypeLeftMouseUp: usize = 2;
 pub const NSEventTypeRightMouseDown: usize = 3;
@@ -58,7 +56,6 @@ pub const NSEventTypeOtherMouseDragged: usize = 27;
 
 // ── NSEventModifierFlags ──────────────────────────────────────────────────────
 /// Bitmask values from `[NSEvent modifierFlags]`.
-
 pub const NSEventModifierFlagCapsLock: usize = 1 << 16; // 0x010000
 pub const NSEventModifierFlagShift: usize = 1 << 17; // 0x020000
 pub const NSEventModifierFlagControl: usize = 1 << 18; // 0x040000
@@ -80,7 +77,6 @@ pub const NSWindowCollectionBehaviorFullScreenPrimary: usize = 1 << 7; // 0x80
 
 // ── NSOpenGLContextParameter ──────────────────────────────────────────────────
 /// Parameters for `[NSOpenGLContext setValues:forParameter:]`.
-
 /// Controls vsync (0 = off, 1 = on).
 pub const NSOpenGLContextParameterSwapInterval: i32 = 222;
 /// Controls surface opacity (0 = transparent, 1 = opaque).
@@ -90,7 +86,6 @@ pub const NSOpenGLContextParameterSurfaceOpacity: i32 = 236;
 /// Attributes for `[NSOpenGLPixelFormat initWithAttributes:]`.
 /// These are key-value pairs in a null-terminated u32 array.
 /// Some are flags (just the key, no value); others are key-then-value.
-
 pub const NSOpenGLPFADoubleBuffer: u32 = 5; // flag
 pub const NSOpenGLPFAColorSize: u32 = 8; // key-value
 pub const NSOpenGLPFAAlphaSize: u32 = 11; // key-value

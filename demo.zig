@@ -23,6 +23,7 @@ pub fn main() !void {
     var win = try wndw.init("wndw demo", 800, 600, .{
         .centred = true,
         .resizeable = true,
+        .inset_titlebar = true,
     });
     defer win.close();
 
@@ -47,7 +48,7 @@ pub fn main() !void {
     std.debug.print("  escape  → quit          t → change title\n", .{});
     std.debug.print("  c → center              f → toggle fullscreen\n", .{});
     std.debug.print("  h → hide cursor         s → show cursor\n", .{});
-    std.debug.print("  o → 50%% opacity         p → full opacity\n", .{});
+    std.debug.print("  o → 50%% opacity        p → full opacity\n", .{});
     std.debug.print("  m → minimize            x → maximize\n", .{});
     std.debug.print("  r → read clipboard      w → write clipboard\n", .{});
     std.debug.print("  i → crosshair cursor    a → reset cursor\n", .{});
@@ -67,8 +68,8 @@ pub fn main() !void {
                         .f => win.setFullscreen(!win.isFullscreen()),
                         .h => win.setCursorVisible(false),
                         .s => win.setCursorVisible(true),
-                        .o => win.setOpacity(128),
-                        .p => win.setOpacity(255),
+                        .o => win.setOpacity(0.5),
+                        .p => win.setOpacity(1.0),
                         .m => win.minimize(),
                         .x => win.maximize(),
                         .r => {
@@ -79,7 +80,7 @@ pub fn main() !void {
                             }
                         },
                         .w => win.clipboardWrite("hello from wndw!"),
-                        .i => win.setStandardCursor(.crosshair),
+                        .i => win.setStandardCursor(.closed_hand),
                         .a => win.resetCursor(),
                         else => {},
                     }
@@ -118,11 +119,11 @@ pub fn main() !void {
         }
 
         // Input state queries (Phase 10) — checked after all events are drained
-        if (win.isKeyDown(.space)) {
-            std.debug.print("[input state] space held down\n", .{});
-        }
-        if (win.isMouseDown(.left)) {
-            std.debug.print("[input state] left mouse held\n", .{});
-        }
+        // if (win.isKeyDown(.space)) {
+        //     std.debug.print("[input state] space held down\n", .{});
+        // }
+        // if (win.isMouseDown(.left)) {
+        //     std.debug.print("[input state] left mouse held\n", .{});
+        // }
     }
 }

@@ -52,6 +52,10 @@ pub const Options = struct {
     borderless: bool = false,
     /// Allow the user to resize the window by dragging its edges.
     resizeable: bool = false,
+    /// Use an inset (transparent) titlebar where content extends behind
+    /// the title bar area. The traffic-light buttons remain visible but
+    /// the bar itself is transparent, similar to Safari or Finder.
+    inset_titlebar: bool = false,
 };
 
 // ── Global app state (initialised once) ───────────────────────────────────────
@@ -203,6 +207,8 @@ pub const Window = struct {
     /// drag operation.
     drop_count: u32 = 0,
     drop_paths: [MAX_DROP_FILES][*:0]const u8 = undefined,
+    /// Retained NSString objects backing `drop_paths`. Released on next drop or close().
+    drop_strings: [MAX_DROP_FILES]?objc.id = .{null} ** MAX_DROP_FILES,
     /// Per-frame key and mouse button state for `isKeyDown`/`isKeyPressed` etc.
     input_state: InputState = .{},
     /// Optional event callbacks — fire during `dispatchEvent()`.
@@ -401,7 +407,12 @@ pub const Window = struct {
     /// prevent stale callbacks from firing after the Window struct is freed.
     pub fn close(win: *Window) void {
         win.deleteContext();
+        win.releaseDropStrings();
         objc.msgSend(void, win.ns_window, "setDelegate:", .{@as(?objc.id, null)});
+        // Zero the delegate's back-pointer and release it to prevent late
+        // AppKit notifications from accessing freed Window memory.
+        _ = objc.object_setInstanceVariable(win.ns_delegate, "wndw_win", null);
+        objc.msgSend(void, win.ns_delegate, "release", .{});
         objc.msgSend(void, win.ns_window, "orderOut:", .{@as(?objc.id, null)});
         objc.msgSend(void, win.ns_window, "close", .{});
         std.heap.c_allocator.destroy(win);
@@ -536,12 +547,12 @@ pub const Window = struct {
     }
 
     /// Returns the current content area dimensions in pixels.
-    pub fn getSize(win: *const Window) struct { w: i32, h: i32 } {
+    pub fn getSize(win: *const Window) event.Size {
         return .{ .w = win.w, .h = win.h };
     }
 
     /// Returns the current window position (frame origin in screen coordinates).
-    pub fn getPos(win: *const Window) struct { x: i32, y: i32 } {
+    pub fn getPos(win: *const Window) event.Position {
         return .{ .x = win.x, .y = win.y };
     }
 
@@ -552,17 +563,15 @@ pub const Window = struct {
         objc.msgSend(void, win.ns_window, "setTitle:", .{objc.ns_string(title)});
     }
 
-    /// Resize the window to the given dimensions (in points). The window
-    /// position is preserved — only the size changes.
+    /// Resize the window's content area to the given dimensions (in points).
+    /// The window position is preserved — only the size changes.
     pub fn resize(win: *Window, w: i32, h: i32) void {
-        const FnGet = fn (objc.id, objc.SEL) callconv(.c) objc.NSRect;
-        const fn_get: *const FnGet = @ptrCast(&objc.objc_msgSend);
-        var frame = fn_get(win.ns_window, objc.sel_registerName("frame"));
-        frame.size.width = @floatFromInt(w);
-        frame.size.height = @floatFromInt(h);
-        const FnSet = fn (objc.id, objc.SEL, objc.NSRect, objc.BOOL) callconv(.c) void;
-        const fn_set: *const FnSet = @ptrCast(&objc.objc_msgSend);
-        fn_set(win.ns_window, objc.sel_registerName("setFrame:display:"), frame, objc.YES);
+        const FnSetSize = fn (objc.id, objc.SEL, objc.NSSize) callconv(.c) void;
+        const fn_set: *const FnSetSize = @ptrCast(&objc.objc_msgSend);
+        fn_set(win.ns_window, objc.sel_registerName("setContentSize:"), .{
+            .width = @floatFromInt(w),
+            .height = @floatFromInt(h),
+        });
     }
 
     /// Move the window to the given screen position (bottom-left origin,
@@ -604,7 +613,9 @@ pub const Window = struct {
     /// (excluding the menu bar and dock).
     pub fn maximize(win: *Window) void {
         if (win.is_borderless) {
-            const screen = objc.msgSend(objc.id, win.ns_window, "screen", .{});
+            const FnScreen = fn (objc.id, objc.SEL) callconv(.c) ?objc.id;
+            const fn_screen: *const FnScreen = @ptrCast(&objc.objc_msgSend);
+            const screen = fn_screen(win.ns_window, objc.sel_registerName("screen")) orelse return;
             const FnRect = fn (objc.id, objc.SEL) callconv(.c) objc.NSRect;
             const fn_rect: *const FnRect = @ptrCast(&objc.objc_msgSend);
             const visible = fn_rect(screen, objc.sel_registerName("visibleFrame"));
@@ -629,6 +640,7 @@ pub const Window = struct {
     /// Show or hide the mouse cursor. Uses NSCursor's class-level hide/unhide
     /// which operates a global reference count.
     pub fn setCursorVisible(win: *Window, visible: bool) void {
+        if (visible == win.is_cursor_visible) return; // avoid unbalancing the global counter
         if (visible) {
             objc.msgSend(void, objc.ns_class("NSCursor"), "unhide", .{});
         } else {
@@ -672,11 +684,11 @@ pub const Window = struct {
         return objc.msgSend(objc.BOOL, win.ns_window, "isZoomed", .{}) != objc.NO;
     }
 
-    /// Set the window opacity (0 = fully transparent, 255 = fully opaque).
-    pub fn setOpacity(win: *Window, opacity: u8) void {
+    /// Set the window opacity (0.0 = fully transparent, 1.0 = fully opaque).
+    pub fn setOpacity(win: *Window, opacity: f32) void {
         const FnAlpha = fn (objc.id, objc.SEL, objc.CGFloat) callconv(.c) void;
         const fn_ptr: *const FnAlpha = @ptrCast(&objc.objc_msgSend);
-        const alpha: objc.CGFloat = @as(objc.CGFloat, @floatFromInt(opacity)) / 255.0;
+        const alpha: objc.CGFloat = @floatCast(std.math.clamp(opacity, 0.0, 1.0));
         fn_ptr(win.ns_window, objc.sel_registerName("setAlphaValue:"), alpha);
     }
 
@@ -775,10 +787,10 @@ pub const Window = struct {
     }
 
     /// Write plain text to the system clipboard, replacing any existing content.
-    pub fn clipboardWrite(_: *Window, text: [*:0]const u8) void {
+    pub fn clipboardWrite(_: *Window, text: [:0]const u8) void {
         const pb = objc.msgSend(objc.id, objc.ns_class("NSPasteboard"), "generalPasteboard", .{});
         objc.msgSend(void, pb, "clearContents", .{});
-        const ns_str = objc.ns_string(text);
+        const ns_str = objc.ns_string(text.ptr);
         const ns_str_type = objc.ns_string("public.utf8-plain-text");
         _ = objc.msgSend(objc.BOOL, pb, "setString:forType:", .{ ns_str, ns_str_type });
     }
@@ -804,6 +816,17 @@ pub const Window = struct {
         return win.drop_paths[0..win.drop_count];
     }
 
+    /// Release retained NSString objects backing drop_paths.
+    fn releaseDropStrings(win: *Window) void {
+        for (&win.drop_strings) |*slot| {
+            if (slot.*) |s| {
+                objc.msgSend(void, s, "release", .{});
+                slot.* = null;
+            }
+        }
+        win.drop_count = 0;
+    }
+
     // ── Mouse cursor ─────────────────────────────────────────────────────
 
     /// Warp the mouse cursor to the given screen-absolute position.
@@ -818,13 +841,44 @@ pub const Window = struct {
     /// Get the current mouse position in screen coordinates (top-left origin).
     /// Uses `[NSEvent mouseLocation]` and flips Y from Cocoa's bottom-left
     /// origin to a top-left origin.
-    pub fn getMousePos(_: *Window) struct { x: i32, y: i32 } {
+    pub fn getMousePos(_: *Window) event.Position {
         const loc = objc.msgSend(objc.NSPoint, objc.ns_class("NSEvent"), "mouseLocation", .{});
-        const screen = objc.msgSend(objc.id, objc.ns_class("NSScreen"), "mainScreen", .{});
-        const frame = objc.msgSend(objc.NSRect, screen, "frame", .{});
+
+        // Find the screen containing the cursor for correct Y flip.
+        const FnRect = fn (objc.id, objc.SEL) callconv(.c) objc.NSRect;
+        const fn_rect: *const FnRect = @ptrCast(&objc.objc_msgSend);
+        const FnIdx = fn (objc.id, objc.SEL, objc.NSUInteger) callconv(.c) objc.id;
+        const fn_idx: *const FnIdx = @ptrCast(&objc.objc_msgSend);
+
+        const screens = objc.msgSend(objc.id, objc.ns_class("NSScreen"), "screens", .{});
+        const count = objc.msgSend(objc.NSUInteger, screens, "count", .{});
+        var screen_frame: objc.NSRect = undefined;
+        var found = false;
+
+        var i: objc.NSUInteger = 0;
+        while (i < count) : (i += 1) {
+            const scr = fn_idx(screens, objc.sel_registerName("objectAtIndex:"), i);
+            const sf = fn_rect(scr, objc.sel_registerName("frame"));
+            if (loc.x >= sf.origin.x and loc.x < sf.origin.x + sf.size.width and
+                loc.y >= sf.origin.y and loc.y < sf.origin.y + sf.size.height)
+            {
+                screen_frame = sf;
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            // Fallback to main screen if cursor is between screens.
+            screen_frame = fn_rect(
+                objc.msgSend(objc.id, objc.ns_class("NSScreen"), "mainScreen", .{}),
+                objc.sel_registerName("frame"),
+            );
+        }
+
         return .{
-            .x = @intFromFloat(loc.x),
-            .y = @intFromFloat(frame.size.height - loc.y),
+            .x = @intFromFloat(loc.x - screen_frame.origin.x),
+            .y = @intFromFloat((screen_frame.origin.y + screen_frame.size.height) - loc.y),
         };
     }
 
@@ -870,8 +924,13 @@ pub const Window = struct {
     }
 
     /// Returns info about the display the window is currently on.
+    /// Returns the primary monitor as a fallback if the window is off-screen
+    /// (e.g. minimized to the dock).
     pub fn getWindowMonitor(win: *Window) Monitor {
-        const screen = objc.msgSend(objc.id, win.ns_window, "screen", .{});
+        const FnScreen = fn (objc.id, objc.SEL) callconv(.c) ?objc.id;
+        const fn_screen: *const FnScreen = @ptrCast(&objc.objc_msgSend);
+        const screen = fn_screen(win.ns_window, objc.sel_registerName("screen")) orelse
+            objc.msgSend(objc.id, objc.ns_class("NSScreen"), "mainScreen", .{});
         return monitor_from_screen(screen);
     }
 
@@ -922,6 +981,9 @@ pub const Window = struct {
     /// an `NSOpenGLPixelFormat` + `NSOpenGLContext`, and makes it current.
     /// Call `deleteContext()` to clean up, or let `close()` handle it.
     pub fn createGLContext(win: *Window, hints: GLHints) !void {
+        // Clean up any existing context before creating a new one.
+        if (win.gl_context != null) win.deleteContext();
+
         // Build null-terminated attribute array for NSOpenGLPixelFormat.
         var attrs: [30]u32 = undefined;
         var i: usize = 0;
@@ -1037,8 +1099,17 @@ pub const Window = struct {
 
     /// Destroy the GL context and pixel format.
     pub fn deleteContext(win: *Window) void {
-        objc.msgSend(void, objc.ns_class("NSOpenGLContext"), "clearCurrentContext", .{});
         if (win.gl_context) |ctx| {
+            // Only clear the thread's current context if it belongs to this window,
+            // so other windows' GL contexts are not disturbed.
+            const FnCur = fn (objc.id, objc.SEL) callconv(.c) ?objc.id;
+            const fn_cur: *const FnCur = @ptrCast(&objc.objc_msgSend);
+            const current = fn_cur(objc.ns_class("NSOpenGLContext"), objc.sel_registerName("currentContext"));
+            if (current) |cur| {
+                if (cur == ctx) {
+                    objc.msgSend(void, objc.ns_class("NSOpenGLContext"), "clearCurrentContext", .{});
+                }
+            }
             objc.msgSend(void, ctx, "release", .{});
             win.gl_context = null;
         }
@@ -1067,6 +1138,7 @@ pub const Window = struct {
         };
         if (S.bundle == null) {
             const bundle_id = CFStringCreateWithCString(null, "com.apple.opengl", kCFStringEncodingASCII) orelse return null;
+            defer CFRelease(bundle_id);
             S.bundle = CFBundleGetBundleWithIdentifier(bundle_id);
         }
         const bundle = S.bundle orelse return null;
@@ -1096,6 +1168,7 @@ pub const Window = struct {
 
 /// Create and show a new window. Bootstraps NSApplication on first call.
 pub fn init(title: [:0]const u8, w: i32, h: i32, opts: Options) !*Window {
+    if (w <= 0 or h <= 0) return error.InvalidDimensions;
     if (!g.initialised) try setup_app();
 
     const win = try std.heap.c_allocator.create(Window);
@@ -1119,6 +1192,7 @@ pub fn init(title: [:0]const u8, w: i32, h: i32, opts: Options) !*Window {
         cocoa.NSWindowStyleMaskClosable |
         cocoa.NSWindowStyleMaskMiniaturizable;
     if (opts.resizeable) mask |= cocoa.NSWindowStyleMaskResizable;
+    if (opts.inset_titlebar) mask |= cocoa.NSWindowStyleMaskFullSizeContentView;
     if (opts.borderless) mask = cocoa.NSWindowStyleMaskBorderless;
 
     // Compute initial position (centred or top-left).
@@ -1131,9 +1205,6 @@ pub fn init(title: [:0]const u8, w: i32, h: i32, opts: Options) !*Window {
             (screen_h - @as(f64, @floatFromInt(h))) / 2.0
         else
             0.0;
-
-    win.x = @intFromFloat(cx);
-    win.y = @intFromFloat(screen_h - @as(f64, @floatFromInt(h)) - cy);
 
     const rect = objc.NSRect{
         .origin = .{ .x = cx, .y = cy },
@@ -1156,11 +1227,16 @@ pub fn init(title: [:0]const u8, w: i32, h: i32, opts: Options) !*Window {
     win.ns_window = ns_win;
     win.is_borderless = opts.borderless;
 
+    // Allow native fullscreen via the green title bar button / toggleFullScreen:.
+    const FnSetBehavior = fn (objc.id, objc.SEL, objc.NSUInteger) callconv(.c) void;
+    const fn_behav: *const FnSetBehavior = @ptrCast(&objc.objc_msgSend);
+    fn_behav(ns_win, objc.sel_registerName("setCollectionBehavior:"), cocoa.NSWindowCollectionBehaviorFullScreenPrimary);
+
     objc.msgSend(void, ns_win, "setTitle:", .{objc.ns_string(title)});
 
     // Create and attach the window delegate (for resize/move/focus callbacks).
     const delegate = objc.msgSend(objc.id, objc.msgSend(objc.id, g.win_delegate_cls, "alloc", .{}), "init", .{});
-    objc.object_setInstanceVariable(delegate, "wndw_win", win);
+    _ = objc.object_setInstanceVariable(delegate, "wndw_win", win);
     objc.msgSend(void, ns_win, "setDelegate:", .{delegate});
     win.ns_delegate = delegate;
 
@@ -1191,10 +1267,16 @@ pub fn init(title: [:0]const u8, w: i32, h: i32, opts: Options) !*Window {
         null,
     );
     objc.msgSend(void, ns_view, "addTrackingArea:", .{tracking_area});
+    objc.msgSend(void, tracking_area, "release", .{}); // balance alloc/init; view retains its own ref
 
     if (opts.transparent) {
         objc.msgSend(void, ns_win, "setOpaque:", .{objc.NO});
         objc.msgSend(void, ns_win, "setBackgroundColor:", .{objc.msgSend(objc.id, objc.ns_class("NSColor"), "clearColor", .{})});
+    }
+
+    if (opts.inset_titlebar) {
+        objc.msgSend(void, ns_win, "setTitlebarAppearsTransparent:", .{objc.YES});
+        objc.msgSend(void, ns_win, "setTitleVisibility:", .{@as(objc.NSInteger, 1)}); // NSWindowTitleHidden
     }
 
     // Make the view first responder so key events route to it.
@@ -1204,6 +1286,14 @@ pub fn init(title: [:0]const u8, w: i32, h: i32, opts: Options) !*Window {
     objc.msgSend(void, ns_win, "makeKeyAndOrderFront:", .{@as(?objc.id, null)});
     objc.msgSend(void, g.app, "activateIgnoringOtherApps:", .{objc.YES});
 
+    // Read back the actual window position from AppKit so win.x/win.y are
+    // consistent with what delegate_window_did_move stores (raw Cocoa coords).
+    const FnActualFrame = fn (objc.id, objc.SEL) callconv(.c) objc.NSRect;
+    const fn_actual: *const FnActualFrame = @ptrCast(&objc.objc_msgSend);
+    const actual_frame = fn_actual(ns_win, objc.sel_registerName("frame"));
+    win.x = @intFromFloat(actual_frame.origin.x);
+    win.y = @intFromFloat(actual_frame.origin.y);
+
     return win;
 }
 
@@ -1212,6 +1302,12 @@ pub fn init(title: [:0]const u8, w: i32, h: i32, opts: Options) !*Window {
 /// Drain all pending NSEvents from the application run loop and translate
 /// them into wndw Events. Called by `poll()` when the queue is empty.
 fn drain_ns_events(win: *Window) void {
+    // Wrap the drain in an autorelease pool so autoreleased objects created by
+    // nextEventMatchingMask: and sendEvent: are collected each frame rather
+    // than accumulating indefinitely.
+    const pool = objc.msgSend(objc.id, objc.msgSend(objc.id, objc.ns_class("NSAutoreleasePool"), "alloc", .{}), "init", .{});
+    defer objc.msgSend(void, pool, "drain", .{});
+
     const mode = g.run_loop_mode;
     const FnNext = fn (objc.id, objc.SEL, usize, ?objc.id, objc.id, objc.BOOL) callconv(.c) ?objc.id;
     const next_sel = objc.sel_registerName("nextEventMatchingMask:untilDate:inMode:dequeue:");
@@ -1276,12 +1372,12 @@ fn translate_event(win: *Window, ns_ev: objc.id, ev_type: usize) void {
         cocoa.NSEventTypeRightMouseDown => win.queue.push(.{ .mouse_pressed = .right }),
         cocoa.NSEventTypeRightMouseUp => win.queue.push(.{ .mouse_released = .right }),
         cocoa.NSEventTypeOtherMouseDown => {
-            const btn = other_mouse_button(objc.msgSend(objc.NSInteger, ns_ev, "buttonNumber", .{}));
-            win.queue.push(.{ .mouse_pressed = btn });
+            if (other_mouse_button(objc.msgSend(objc.NSInteger, ns_ev, "buttonNumber", .{}))) |btn|
+                win.queue.push(.{ .mouse_pressed = btn });
         },
         cocoa.NSEventTypeOtherMouseUp => {
-            const btn = other_mouse_button(objc.msgSend(objc.NSInteger, ns_ev, "buttonNumber", .{}));
-            win.queue.push(.{ .mouse_released = btn });
+            if (other_mouse_button(objc.msgSend(objc.NSInteger, ns_ev, "buttonNumber", .{}))) |btn|
+                win.queue.push(.{ .mouse_released = btn });
         },
 
         cocoa.NSEventTypeMouseMoved,
@@ -1306,12 +1402,12 @@ fn translate_event(win: *Window, ns_ev: objc.id, ev_type: usize) void {
 
 /// Map NSEvent `buttonNumber` to `MouseButton`. Handles "other" buttons only
 /// (left=0 and right=1 are handled by their own event types).
-fn other_mouse_button(btn: objc.NSInteger) event.MouseButton {
+fn other_mouse_button(btn: objc.NSInteger) ?event.MouseButton {
     return switch (btn) {
         2 => .middle,
         3 => .x1,
         4 => .x2,
-        else => .middle,
+        else => null,
     };
 }
 
@@ -1362,7 +1458,8 @@ fn setup_window_delegate_class() !void {
     g.win_delegate_cls = objc.objc_allocateClassPair(objc.objc_getClass("NSObject"), "WndwWindowDelegate", 0) orelse
         return error.ClassAllocFailed;
 
-    _ = objc.class_addIvar(g.win_delegate_cls, "wndw_win", @sizeOf(*anyopaque), @alignOf(*anyopaque), "^v");
+    // ObjC runtime expects log2(alignment_in_bytes), not raw bytes.
+    _ = objc.class_addIvar(g.win_delegate_cls, "wndw_win", @sizeOf(*anyopaque), @ctz(@as(usize, @alignOf(*anyopaque))), "^v");
 
     _ = objc.class_addMethod(g.win_delegate_cls, objc.sel_registerName("windowShouldClose:"), @ptrCast(&delegate_window_should_close), "B@:@");
     _ = objc.class_addMethod(g.win_delegate_cls, objc.sel_registerName("windowDidResize:"), @ptrCast(&delegate_window_did_resize), "v@:@");
@@ -1381,7 +1478,8 @@ fn setup_view_class() !void {
     g.view_cls = objc.objc_allocateClassPair(objc.objc_getClass("NSView"), "WndwView", 0) orelse
         return error.ClassAllocFailed;
 
-    _ = objc.class_addIvar(g.view_cls, "wndw_win", @sizeOf(*anyopaque), @alignOf(*anyopaque), "^v");
+    // ObjC runtime expects log2(alignment_in_bytes), not raw bytes.
+    _ = objc.class_addIvar(g.view_cls, "wndw_win", @sizeOf(*anyopaque), @ctz(@as(usize, @alignOf(*anyopaque))), "^v");
 
     _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("initWithWndwWindow:"), @ptrCast(&view_init_with_window), "@@:^v");
     _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("acceptsFirstResponder"), @ptrCast(&view_accepts_first_responder), "B@:");
@@ -1401,7 +1499,7 @@ fn setup_view_class() !void {
 /// Retrieve the `*Window` back-pointer from a delegate/view ivar.
 fn get_win_from_delegate(delegate: objc.id) ?*Window {
     var ptr: ?*anyopaque = null;
-    objc.object_getInstanceVariable(delegate, "wndw_win", &ptr);
+    _ = objc.object_getInstanceVariable(delegate, "wndw_win", &ptr);
     const p = ptr orelse return null;
     return @ptrCast(@alignCast(p));
 }
@@ -1409,10 +1507,13 @@ fn get_win_from_delegate(delegate: objc.id) ?*Window {
 /// `windowShouldClose:` — close button or Cmd+W.
 fn delegate_window_should_close(self: objc.id, _: objc.SEL, _: objc.id) callconv(.c) objc.BOOL {
     if (get_win_from_delegate(self)) |win| {
-        win.should_close = true;
+        // Do NOT set should_close here — let user code decide by calling
+        // win.quit() from the event handler or callback.
         win.queue.push(.close_requested);
     }
-    return objc.YES;
+    // Return NO so AppKit does not proceed to close the window automatically.
+    // The user must call win.quit() to actually close.
+    return objc.NO;
 }
 
 /// `windowDidResize:` — window frame changed size.
@@ -1479,18 +1580,19 @@ fn delegate_window_did_deminiaturize(self: objc.id, _: objc.SEL, _: objc.id) cal
 /// Retrieve the `*Window` back-pointer from a WndwView ivar.
 fn get_win_from_view(view: objc.id) ?*Window {
     var ptr: ?*anyopaque = null;
-    objc.object_getInstanceVariable(view, "wndw_win", &ptr);
+    _ = objc.object_getInstanceVariable(view, "wndw_win", &ptr);
     const p = ptr orelse return null;
     return @ptrCast(@alignCast(p));
 }
 
-/// Custom initialiser: stores the Window back-pointer, calls `initWithFrame:`.
+/// Custom initialiser: stores the Window back-pointer, calls `[super initWithFrame:]`.
 fn view_init_with_window(self: objc.id, _: objc.SEL, win: *Window) callconv(.c) objc.id {
-    const FnInitFrame = fn (objc.id, objc.SEL, objc.NSRect) callconv(.c) objc.id;
-    const fn_ptr: *const FnInitFrame = @ptrCast(&objc.objc_msgSend);
+    const FnSuperInit = fn (*const objc.ObjcSuper, objc.SEL, objc.NSRect) callconv(.c) objc.id;
+    const fn_super: *const FnSuperInit = @ptrCast(&objc.objc_msgSendSuper);
     const zero = objc.NSRect{ .origin = .{ .x = 0, .y = 0 }, .size = .{ .width = 0, .height = 0 } };
-    const result = fn_ptr(self, objc.sel_registerName("initWithFrame:"), zero);
-    objc.object_setInstanceVariable(result, "wndw_win", win);
+    const sup = objc.ObjcSuper{ .receiver = self, .super_class = objc.ns_class("NSView") };
+    const result = fn_super(&sup, objc.sel_registerName("initWithFrame:"), zero);
+    _ = objc.object_setInstanceVariable(result, "wndw_win", win);
     return result;
 }
 
@@ -1538,7 +1640,8 @@ fn view_dragging_exited(self: objc.id, _: objc.SEL, _: objc.id) callconv(.c) voi
 /// queues a `file_dropped` event.
 fn view_perform_drag_operation(self: objc.id, _: objc.SEL, sender: objc.id) callconv(.c) objc.BOOL {
     const win = get_win_from_view(self) orelse return objc.NO;
-    win.drop_count = 0;
+    // Release previously retained path strings before storing new ones.
+    win.releaseDropStrings();
 
     const pb = objc.msgSend(objc.id, sender, "draggingPasteboard", .{});
     const url_cls = objc.ns_class("NSURL");
@@ -1553,6 +1656,10 @@ fn view_perform_drag_operation(self: objc.id, _: objc.SEL, sender: objc.id) call
             const url = fn_idx(url_array, objc.sel_registerName("objectAtIndex:"), i);
             const path_str: ?objc.id = objc.msgSend(?objc.id, url, "path", .{});
             if (path_str) |ps| {
+                // Retain the NSString so UTF8String remains valid until the
+                // next drop operation or window close.
+                _ = objc.msgSend(objc.id, ps, "retain", .{});
+                win.drop_strings[win.drop_count] = ps;
                 const utf8 = objc.msgSend([*:0]const u8, ps, "UTF8String", .{});
                 win.drop_paths[win.drop_count] = utf8;
                 win.drop_count += 1;

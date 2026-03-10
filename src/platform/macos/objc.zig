@@ -16,7 +16,6 @@ const std = @import("std");
 
 // ── Core types ────────────────────────────────────────────────────────────────
 /// These mirror the ObjC runtime's fundamental types.
-
 /// An ObjC object pointer (equivalent to `id` in ObjC).
 pub const id = *anyopaque;
 /// An ObjC selector (equivalent to `SEL`).
@@ -41,7 +40,6 @@ pub const NO: BOOL = 0;
 // ── Geometry ──────────────────────────────────────────────────────────────────
 /// These `extern struct` types match the C ABI layout of their CoreGraphics
 /// equivalents. They can be passed to/from `objc_msgSend` directly on arm64.
-
 pub const NSPoint = extern struct { x: CGFloat, y: CGFloat };
 pub const NSSize = extern struct { width: CGFloat, height: CGFloat };
 pub const NSRect = extern struct { origin: NSPoint, size: NSSize };
@@ -49,7 +47,6 @@ pub const NSRect = extern struct { origin: NSPoint, size: NSSize };
 // ── Runtime functions ─────────────────────────────────────────────────────────
 /// Direct `extern fn` declarations against libobjc. These are linked at
 /// build time via `-framework Cocoa` and resolved by the dynamic linker.
-
 /// Look up a class by name. Returns `null` if the class isn't loaded.
 pub extern fn objc_getClass(name: [*:0]const u8) ?Class;
 /// Register (or look up) a selector by name.
@@ -68,14 +65,26 @@ pub extern fn class_addMethod(cls: Class, sel: SEL, imp: IMP, types: [*:0]const 
 pub extern fn class_addIvar(cls: Class, name: [*:0]const u8, size: usize, alignment: u8, types: [*:0]const u8) BOOL;
 /// Get the superclass of a class.
 pub extern fn class_getSuperclass(cls: Class) ?Class;
-/// Read an instance variable's value (as a raw pointer).
-pub extern fn object_getInstanceVariable(obj: id, name: [*:0]const u8, out: *?*anyopaque) void;
-/// Write an instance variable's value.
-pub extern fn object_setInstanceVariable(obj: id, name: [*:0]const u8, value: ?*anyopaque) void;
+/// Opaque ObjC instance variable handle.
+pub const Ivar = *anyopaque;
+/// Read an instance variable's value (as a raw pointer). Returns the Ivar handle, or null if not found.
+pub extern fn object_getInstanceVariable(obj: id, name: [*:0]const u8, out: *?*anyopaque) ?Ivar;
+/// Write an instance variable's value. Returns the Ivar handle, or null if not found.
+pub extern fn object_setInstanceVariable(obj: id, name: [*:0]const u8, value: ?*anyopaque) ?Ivar;
 
 /// The universal message-sending function. NEVER call directly — always
 /// cast to the correct function pointer type via `msgSend()` below.
 pub extern fn objc_msgSend() void;
+
+/// Message send to the superclass. Used for calling `[super initWithFrame:]`
+/// etc. from within a subclass method implementation.
+pub extern fn objc_msgSendSuper() void;
+
+/// Argument struct for `objc_msgSendSuper`.
+pub const ObjcSuper = extern struct {
+    receiver: id,
+    super_class: Class,
+};
 
 // ── CoreGraphics ─────────────────────────────────────────────────────────────
 
@@ -99,6 +108,12 @@ pub extern fn CGWarpMouseCursorPosition(point: CGPoint) i32;
 /// msgSend(void, app, "activateIgnoringOtherApps:", .{YES});
 /// ```
 pub fn msgSend(comptime Ret: type, obj: anytype, sel_name: [*:0]const u8, args: anytype) Ret {
+    // On x86_64, structs larger than 16 bytes must use objc_msgSend_stret.
+    // This backend only supports arm64 where objc_msgSend handles all return types.
+    if (comptime @sizeOf(Ret) > 16 and @import("builtin").cpu.arch != .aarch64) {
+        @compileError("msgSend: returning structs >16 bytes (e.g. NSRect) requires objc_msgSend_stret on x86_64; this backend only supports arm64");
+    }
+
     const sel = sel_registerName(sel_name);
     const recv: id = @ptrCast(@alignCast(obj));
     const fi = @typeInfo(@TypeOf(args)).@"struct".fields;
@@ -120,8 +135,10 @@ pub fn ns_class(name: [*:0]const u8) Class {
 }
 
 /// Create an autoreleased NSString from a null-terminated UTF-8 C string.
+/// Panics if the input is not valid UTF-8 (stringWithUTF8String: returns nil).
 pub fn ns_string(s: [*:0]const u8) id {
-    return msgSend(id, ns_class("NSString"), "stringWithUTF8String:", .{s});
+    return msgSend(?id, ns_class("NSString"), "stringWithUTF8String:", .{s}) orelse
+        std.debug.panic("ns_string: invalid UTF-8 input", .{});
 }
 
 /// Retain an ObjC object (increment reference count). Returns the same pointer.

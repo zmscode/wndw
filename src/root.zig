@@ -49,6 +49,7 @@ pub const Size = @import("event.zig").Size;
 pub const ScrollDelta = @import("event.zig").ScrollDelta;
 pub const Options = platform.Options;
 pub const GLHints = platform.GLHints;
+pub const Monitor = platform.Monitor;
 /// OpenGL function pointer type compatible with zgl's `binding.FunctionPointer`.
 pub const FnPtr = Window.FnPtr;
 

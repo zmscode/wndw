@@ -26,50 +26,135 @@ pub const Key = enum {
     unknown,
 
     // Letters
-    a, b, c, d, e, f, g, h, i, j, k, l, m,
-    n, o, p, q, r, s, t, u, v, w, x, y, z,
+    a,
+    b,
+    c,
+    d,
+    e,
+    f,
+    g,
+    h,
+    i,
+    j,
+    k,
+    l,
+    m,
+    n,
+    o,
+    p,
+    q,
+    r,
+    s,
+    t,
+    u,
+    v,
+    w,
+    x,
+    y,
+    z,
 
     // Digits
-    @"0", @"1", @"2", @"3", @"4", @"5", @"6", @"7", @"8", @"9",
+    @"0",
+    @"1",
+    @"2",
+    @"3",
+    @"4",
+    @"5",
+    @"6",
+    @"7",
+    @"8",
+    @"9",
 
     // Function keys
-    f1, f2, f3, f4, f5, f6, f7, f8, f9, f10,
-    f11, f12, f13, f14, f15, f16, f17, f18, f19, f20,
+    f1,
+    f2,
+    f3,
+    f4,
+    f5,
+    f6,
+    f7,
+    f8,
+    f9,
+    f10,
+    f11,
+    f12,
+    f13,
+    f14,
+    f15,
+    f16,
+    f17,
+    f18,
+    f19,
+    f20,
 
     // Navigation
-    left, right, up, down,
-    home, end, page_up, page_down,
+    left,
+    right,
+    up,
+    down,
+    home,
+    end,
+    page_up,
+    page_down,
 
     // Editing
-    enter, escape, backspace, delete, tab, space, insert,
+    enter,
+    escape,
+    backspace,
+    delete,
+    tab,
+    space,
+    insert,
 
     // Modifiers — left/right variants for apps that distinguish them.
-    left_shift, right_shift,
-    left_ctrl, right_ctrl,
-    left_alt, right_alt,
-    left_super, right_super,   // Cmd on macOS, Win key on Windows
-    caps_lock, num_lock, scroll_lock,
+    left_shift,
+    right_shift,
+    left_ctrl,
+    right_ctrl,
+    left_alt,
+    right_alt,
+    left_super,
+    right_super, // Cmd on macOS, Win key on Windows
+    caps_lock,
+    num_lock,
+    scroll_lock,
 
     // Punctuation / symbols
-    minus,         // -
-    equal,         // =
-    left_bracket,  // [
+    minus, // -
+    equal, // =
+    left_bracket, // [
     right_bracket, // ]
-    backslash,     // \
-    semicolon,     // ;
-    apostrophe,    // '
-    grave,         // `
-    comma,         // ,
-    period,        // .
-    slash,         // /
+    backslash, // \
+    semicolon, // ;
+    apostrophe, // '
+    grave, // `
+    comma, // ,
+    period, // .
+    slash, // /
 
     // Numpad
-    kp_0, kp_1, kp_2, kp_3, kp_4, kp_5, kp_6, kp_7, kp_8, kp_9,
-    kp_decimal, kp_divide, kp_multiply, kp_subtract, kp_add,
-    kp_enter, kp_equal,
+    kp_0,
+    kp_1,
+    kp_2,
+    kp_3,
+    kp_4,
+    kp_5,
+    kp_6,
+    kp_7,
+    kp_8,
+    kp_9,
+    kp_decimal,
+    kp_divide,
+    kp_multiply,
+    kp_subtract,
+    kp_add,
+    kp_enter,
+    kp_equal,
 
     // Misc
-    print_screen, pause, menu,
+    print_screen,
+    pause,
+    menu,
 };
 
 // ── MouseButton ───────────────────────────────────────────────────────────────
@@ -103,7 +188,7 @@ pub const Modifiers = struct {
     shift: bool = false,
     ctrl: bool = false,
     alt: bool = false,
-    super: bool = false,     // Cmd on macOS, Win on Windows
+    super: bool = false, // Cmd on macOS, Win on Windows
     caps_lock: bool = false,
 };
 
@@ -119,7 +204,6 @@ pub const KeyEvent = struct {
 /// signatures. Using named types avoids Zig's anonymous-struct-identity
 /// issues where identical-looking anonymous structs from different files
 /// are treated as incompatible types.
-
 /// Screen or window position in pixels (top-left origin for mouse_moved,
 /// bottom-left origin for window moved — matching Cocoa conventions).
 pub const Position = struct { x: i32, y: i32 };
