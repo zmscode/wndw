@@ -2,7 +2,7 @@
 //
 // Element is the vtable interface for all UI primitives.
 // Div is the universal container — supports bg, padding, size, children,
-// corner radius, border, and shadow via a fluent API.
+// corner radius, border, shadow, and flexbox layout via a fluent API.
 
 const std = @import("std");
 const style_mod = @import("style.zig");
@@ -14,9 +14,13 @@ pub const Style = style_mod.Style;
 pub const Color = style_mod.Color;
 pub const Len = style_mod.Len;
 pub const Edges = style_mod.Edges;
+pub const Align = style_mod.Align;
+pub const Justify = style_mod.Justify;
+pub const FlexDirection = style_mod.FlexDirection;
 pub const Size = layout_mod.Size;
 pub const Rect = layout_mod.Rect;
 pub const Constraints = layout_mod.Constraints;
+pub const ChildLayout = layout_mod.ChildLayout;
 pub const PaintContext = paint_mod.PaintContext;
 pub const QuadCmd = draw_list_mod.QuadCmd;
 
@@ -25,6 +29,12 @@ pub const QuadCmd = draw_list_mod.QuadCmd;
 pub const Element = struct {
     vtable: *const VTable,
     data: *anyopaque,
+    /// Flex grow factor — how much of remaining main-axis space this element claims.
+    flex_grow: f32 = 0,
+    /// Flex shrink factor — how much this element shrinks when overflowing.
+    flex_shrink: f32 = 1,
+    /// Per-element cross-axis alignment override.
+    align_self: ?Align = null,
 
     pub const VTable = struct {
         layout_fn: *const fn (*anyopaque, Constraints) Size,
@@ -45,7 +55,7 @@ pub const Element = struct {
 pub const Div = struct {
     sty: Style = .{},
     children_list: std.ArrayListUnmanaged(Element) = .{},
-    child_sizes: std.ArrayListUnmanaged(Size) = .{},
+    child_layouts: std.ArrayListUnmanaged(ChildLayout) = .{},
     arena: std.mem.Allocator,
 
     // ── Fluent style methods ────────────────────────────────────────
@@ -123,8 +133,33 @@ pub const Div = struct {
         return self;
     }
 
+    pub fn grow(self: *Div, g: f32) *Div {
+        self.sty.flex_grow = g;
+        return self;
+    }
+
+    pub fn shrink(self: *Div, s: f32) *Div {
+        self.sty.flex_shrink = s;
+        return self;
+    }
+
+    pub fn align_items(self: *Div, a: Align) *Div {
+        self.sty.align_items = a;
+        return self;
+    }
+
     pub fn align_center(self: *Div) *Div {
         self.sty.align_items = .center;
+        return self;
+    }
+
+    pub fn align_self(self: *Div, a: Align) *Div {
+        self.sty.align_self = a;
+        return self;
+    }
+
+    pub fn justify(self: *Div, j: Justify) *Div {
+        self.sty.justify_content = j;
         return self;
     }
 
@@ -153,42 +188,212 @@ pub const Div = struct {
     // ── Convert to Element ──────────────────────────────────────────
 
     pub fn into_element(self: *Div) Element {
-        return .{ .vtable = &div_vtable, .data = @ptrCast(self) };
+        return .{
+            .vtable = &div_vtable,
+            .data = @ptrCast(self),
+            .flex_grow = self.sty.flex_grow,
+            .flex_shrink = self.sty.flex_shrink,
+            .align_self = self.sty.align_self,
+        };
     }
 
-    // ── Layout (Phase 1: use explicit size or fill constraints) ─────
+    // ── Flexbox Layout ──────────────────────────────────────────────
 
     fn doLayout(ptr: *anyopaque, constraints: Constraints) Size {
         const self: *Div = @ptrCast(@alignCast(ptr));
         const s = &self.sty;
+        const n = self.children_list.items.len;
+        const is_row = s.direction == .row or s.direction == .row_reverse;
 
-        // Resolve own size
+        // ── 1. Resolve own size ─────────────────────────────────────
+        // For auto-sized dimensions, we'll compute content-based size
+        // after measuring children. Use constraint max as initial bound.
+        const auto_w = s.width == .auto;
+        const auto_h = s.height == .auto;
+
         var w: f32 = switch (s.width) {
             .px => |px| px,
-            .auto => constraints.max_w,
             .percent => |p| constraints.max_w * p,
+            .auto => if (constraints.max_w == std.math.inf(f32)) 0 else constraints.max_w,
         };
         var h: f32 = switch (s.height) {
             .px => |px| px,
-            .auto => constraints.max_h,
             .percent => |p| constraints.max_h * p,
+            .auto => if (constraints.max_h == std.math.inf(f32)) 0 else constraints.max_h,
         };
 
         w = std.math.clamp(w, constraints.min_w, constraints.max_w);
         h = std.math.clamp(h, constraints.min_h, constraints.max_h);
 
-        // Layout children with remaining space after padding
-        const inner_w = @max(w - s.padding.horizontal(), 0);
-        const inner_h = @max(h - s.padding.vertical(), 0);
-        const child_constraints = Constraints{
-            .max_w = inner_w,
-            .max_h = inner_h,
-        };
+        // ── 2. Content area after padding ───────────────────────────
+        const pad_h = s.padding.horizontal();
+        const pad_v = s.padding.vertical();
+        const content_w = @max(w - pad_h, 0);
+        const content_h = @max(h - pad_v, 0);
 
-        self.child_sizes.clearRetainingCapacity();
-        for (self.children_list.items) |ch| {
-            const sz = ch.doLayout(child_constraints);
-            self.child_sizes.append(self.arena, sz) catch unreachable;
+        // ── 3. First pass: measure each child ───────────────────────
+        // Main axis: unbounded (let children report natural size)
+        // Cross axis: bounded to content area
+        self.child_layouts.clearRetainingCapacity();
+
+        var total_main: f32 = 0;
+        var max_cross: f32 = 0;
+        var total_grow: f32 = 0;
+
+        // Temporary storage for natural child sizes
+        const child_sizes = self.arena.alloc(Size, n) catch unreachable;
+
+        for (self.children_list.items, 0..) |ch, i| {
+            // Main axis: unbounded (measure natural size).
+            // Cross axis: use content area, or inf if auto-sized (shrink-wrap).
+            const cross_max = if (is_row)
+                (if (auto_h) std.math.inf(f32) else content_h)
+            else
+                (if (auto_w) std.math.inf(f32) else content_w);
+            const child_c = if (is_row)
+                Constraints{ .max_w = std.math.inf(f32), .max_h = cross_max }
+            else
+                Constraints{ .max_w = cross_max, .max_h = std.math.inf(f32) };
+
+            var sz = ch.doLayout(child_c);
+            // Clamp infinite sizes to 0 (auto-sized childless elements)
+            if (sz.w == std.math.inf(f32)) sz.w = 0;
+            if (sz.h == std.math.inf(f32)) sz.h = 0;
+
+            child_sizes[i] = sz;
+            if (is_row) {
+                total_main += sz.w;
+                max_cross = @max(max_cross, sz.h);
+            } else {
+                total_main += sz.h;
+                max_cross = @max(max_cross, sz.w);
+            }
+            total_grow += ch.flex_grow;
+        }
+
+        // ── 4. Gap total ────────────────────────────────────────────
+        const n_gaps: f32 = if (n > 1) @floatFromInt(n - 1) else 0;
+        const gap_total = s.gap * n_gaps;
+
+        // ── 5. Shrink-wrap auto-sized dimensions ────────────────────
+        if (auto_w and n > 0) {
+            if (is_row) {
+                w = total_main + gap_total + pad_h;
+            } else {
+                w = max_cross + pad_h;
+            }
+            w = std.math.clamp(w, constraints.min_w, constraints.max_w);
+        }
+        if (auto_h and n > 0) {
+            if (is_row) {
+                h = max_cross + pad_v;
+            } else {
+                h = total_main + gap_total + pad_v;
+            }
+            h = std.math.clamp(h, constraints.min_h, constraints.max_h);
+        }
+
+        // Recompute content area after auto-sizing
+        const final_content_main = if (is_row) @max(w - pad_h, 0) else @max(h - pad_v, 0);
+        const final_content_cross = if (is_row) @max(h - pad_v, 0) else @max(w - pad_h, 0);
+
+        // ── 6. flex_grow distribution ───────────────────────────────
+        const available = final_content_main - total_main - gap_total;
+        if (available > 0 and total_grow > 0) {
+            for (self.children_list.items, 0..) |ch, i| {
+                if (ch.flex_grow > 0) {
+                    const extra = available * (ch.flex_grow / total_grow);
+                    if (is_row) {
+                        child_sizes[i].w += extra;
+                    } else {
+                        child_sizes[i].h += extra;
+                    }
+                }
+            }
+        }
+
+        // ── 7. justify_content — compute main-axis start & spacing ─
+        var main_offset: f32 = 0;
+        var main_spacing: f32 = s.gap; // default gap between items
+
+        const used_main = blk: {
+            var sum: f32 = 0;
+            for (child_sizes[0..n]) |sz| {
+                sum += if (is_row) sz.w else sz.h;
+            }
+            break :blk sum;
+        };
+        const free_main = @max(final_content_main - used_main - gap_total, 0);
+
+        switch (s.justify_content) {
+            .start => {},
+            .end => {
+                main_offset = free_main;
+            },
+            .center => {
+                main_offset = free_main / 2;
+            },
+            .space_between => {
+                if (n > 1) {
+                    main_spacing = (final_content_main - used_main) / @as(f32, @floatFromInt(n - 1));
+                }
+            },
+            .space_around => {
+                if (n > 0) {
+                    const space = (final_content_main - used_main) / @as(f32, @floatFromInt(n));
+                    main_offset = space / 2;
+                    main_spacing = space;
+                }
+            },
+            .space_evenly => {
+                if (n > 0) {
+                    const space = (final_content_main - used_main) / @as(f32, @floatFromInt(n + 1));
+                    main_offset = space;
+                    main_spacing = space;
+                }
+            },
+        }
+
+        // ── 8. Position children ────────────────────────────────────
+        var cursor: f32 = main_offset;
+
+        for (self.children_list.items, 0..) |ch, i| {
+            const csz = child_sizes[i];
+            const child_main = if (is_row) csz.w else csz.h;
+            const child_cross = if (is_row) csz.h else csz.w;
+
+            // Cross-axis alignment
+            const alignment = ch.align_self orelse s.align_items;
+            var cross_size = child_cross;
+            var cross_offset: f32 = 0;
+
+            switch (alignment) {
+                .start => {},
+                .end => {
+                    cross_offset = final_content_cross - child_cross;
+                },
+                .center => {
+                    cross_offset = (final_content_cross - child_cross) / 2;
+                },
+                .stretch => {
+                    cross_size = final_content_cross;
+                },
+            }
+
+            const cl = if (is_row) ChildLayout{
+                .x = cursor,
+                .y = cross_offset,
+                .w = child_main,
+                .h = cross_size,
+            } else ChildLayout{
+                .x = cross_offset,
+                .y = cursor,
+                .w = cross_size,
+                .h = child_main,
+            };
+
+            self.child_layouts.append(self.arena, cl) catch unreachable;
+            cursor += child_main + main_spacing;
         }
 
         return .{ .w = w, .h = h };
@@ -218,34 +423,21 @@ pub const Div = struct {
             });
         }
 
-        // Paint children into the padded content area
+        // Paint children using positions computed during layout
         const content = bounds.inset(s.padding);
-        var offset_y: f32 = 0;
-        var offset_x: f32 = 0;
 
         for (self.children_list.items, 0..) |ch, i| {
-            const csz = if (i < self.child_sizes.items.len)
-                self.child_sizes.items[i]
+            const cl = if (i < self.child_layouts.items.len)
+                self.child_layouts.items[i]
             else
-                Size{ .w = content.w, .h = content.h };
+                ChildLayout{ .x = 0, .y = 0, .w = content.w, .h = content.h };
 
-            const child_bounds = Rect{
-                .x = content.x + offset_x,
-                .y = content.y + offset_y,
-                .w = csz.w,
-                .h = csz.h,
-            };
-            ch.paint(px, child_bounds);
-
-            // Advance offset by the child's actual size
-            switch (s.direction) {
-                .column, .column_reverse => {
-                    offset_y += csz.h + s.gap;
-                },
-                .row, .row_reverse => {
-                    offset_x += csz.w + s.gap;
-                },
-            }
+            ch.paint(px, .{
+                .x = content.x + cl.x,
+                .y = content.y + cl.y,
+                .w = cl.w,
+                .h = cl.h,
+            });
         }
     }
 };

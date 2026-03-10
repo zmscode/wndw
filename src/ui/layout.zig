@@ -32,6 +32,14 @@ pub const Rect = struct {
     }
 };
 
+/// Computed position and size of a child element within its parent's content area.
+pub const ChildLayout = struct {
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+};
+
 pub const Constraints = struct {
     min_w: f32 = 0,
     min_h: f32 = 0,

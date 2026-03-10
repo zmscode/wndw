@@ -2156,20 +2156,51 @@ Build incrementally. Each phase produces a working demo.
 4. **`[4]f32` bounds in ClipCmd** (not a Rect struct). Keeps ClipCmd self-contained
    in the shared types module without depending on layout.zig's Rect.
 
-**Suggested improvements for Phase 2:**
-- The Div paint pass currently does simple stacking (column/row offset). Phase 2
-  needs proper flexbox: measure children, distribute space via `flex_grow`, apply
-  `align_items` / `justify_content` cross-axis positioning.
+**Suggested improvements for Phase 3:**
 - Consider whether `RenderFn = *const fn (Allocator) Element` should take a
   `*WindowContext` instead, so views can access window state (size, theme, etc.)
   during render.
+- `flex_shrink` is stored but not yet applied during overflow (Phase 2 only
+  distributes positive remaining space via `flex_grow`).
 
-### Phase 2: Flexbox layout (2–3 days)
+### Phase 2: Flexbox layout ✅ DONE
 
-- `LayoutContext` with flex row/column algorithm
-- `Constraints` propagation through the element tree
-- `flex_grow`, `gap`, `align_items`, `justify_content`
-- **Demo**: A toolbar with evenly-spaced buttons that reflow on resize
+- Proper flexbox algorithm in `Div.doLayout`:
+  - Two-pass: measure children → distribute space → position
+  - `flex_grow` distributes remaining main-axis space proportionally
+  - `gap` accounts for spacing in both layout and flex_grow distribution
+  - `justify_content`: start, end, center, space_between, space_around, space_evenly
+  - `align_items`: start, end, center, stretch (default)
+  - `align_self` per-element override via Element struct field
+  - Auto-sized containers shrink-wrap to children (unbounded cross-axis pass)
+- `ChildLayout` struct replaces `child_sizes` — stores computed x/y/w/h per child
+- `Element` now carries `flex_grow`, `flex_shrink`, `align_self` fields (copied
+  from Style in `into_element()`) so parent can read child layout hints without vtable
+- New fluent API: `.grow(f32)`, `.shrink(f32)`, `.align_items(Align)`, `.align_self(Align)`,
+  `.justify(Justify)`
+- 17 new tests (46 total): flex row/col positioning, gap, flex_grow equal and
+  proportional, align_items center/stretch, align_self override, justify_content
+  all 6 modes, auto-sized shrink-wrap row/col, flex_grow+gap, padding+flex, nested flex
+- **Demo**: `flex_demo.zig` — 5-section layout showcasing toolbar, flex_grow,
+  space_between, sidebar+content split, centered card
+
+**Architecture decisions (Phase 2):**
+
+1. **Layout hints on Element struct** (not vtable). `flex_grow`, `flex_shrink`, and
+   `align_self` live directly on Element, copied from Style in `into_element()`. This
+   avoids adding a `get_style` vtable method and keeps the parent's flexbox algorithm
+   simple — it reads child layout hints directly without dynamic dispatch.
+
+2. **ChildLayout replaces child_sizes**. Layout now computes full x/y/w/h positions
+   relative to the content area. Paint just offsets by content origin — no position
+   computation in the paint pass.
+
+3. **Unbounded cross-axis for auto-sized containers**. When a dimension is `.auto` and
+   constraints are unbounded, children are measured with `inf` on the cross axis so
+   explicit child sizes are preserved. After measurement, the container shrink-wraps
+   to `max(child_cross)`.
+
+4. **`align` is a reserved word in Zig**. Variable named `alignment` instead.
 
 ### Phase 3: Text rendering — GPUI-style glyph atlas (2–3 days)
 

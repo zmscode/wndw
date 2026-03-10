@@ -321,6 +321,348 @@ test "Nested divs emit multiple quads" {
     try testing.expectEqual(@as(f32, 20), inner_q.bounds[1]); // y offset by top padding
 }
 
+// ── Phase 2: Flexbox layout tests ───────────────────────────────────
+
+test "flex row positions children horizontally" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var px = ui.PaintContext.init(testing.allocator);
+    defer px.deinit();
+
+    const c1 = ui.div(alloc).bg(ui.Color.hex(0xFF0000)).size(60, 40).into_element();
+    const c2 = ui.div(alloc).bg(ui.Color.hex(0x00FF00)).size(80, 40).into_element();
+
+    const row = ui.div(alloc).flex_row().child(c1).child(c2).into_element();
+    _ = row.doLayout(ui.Constraints.tight(400, 200));
+    row.paint(&px, .{ .x = 0, .y = 0, .w = 400, .h = 200 });
+
+    // First child at x=0, second at x=60
+    try testing.expectEqual(@as(usize, 2), px.draw_list.quads.items.len);
+    try testing.expectApproxEqAbs(@as(f32, 0), px.draw_list.quads.items[0].bounds[0], 0.1);
+    try testing.expectApproxEqAbs(@as(f32, 60), px.draw_list.quads.items[1].bounds[0], 0.1);
+}
+
+test "flex column positions children vertically" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var px = ui.PaintContext.init(testing.allocator);
+    defer px.deinit();
+
+    const c1 = ui.div(alloc).bg(ui.Color.hex(0xFF0000)).size(100, 30).into_element();
+    const c2 = ui.div(alloc).bg(ui.Color.hex(0x00FF00)).size(100, 50).into_element();
+
+    const col = ui.div(alloc).flex_col().child(c1).child(c2).into_element();
+    _ = col.doLayout(ui.Constraints.tight(400, 400));
+    col.paint(&px, .{ .x = 0, .y = 0, .w = 400, .h = 400 });
+
+    try testing.expectEqual(@as(usize, 2), px.draw_list.quads.items.len);
+    try testing.expectApproxEqAbs(@as(f32, 0), px.draw_list.quads.items[0].bounds[1], 0.1);
+    try testing.expectApproxEqAbs(@as(f32, 30), px.draw_list.quads.items[1].bounds[1], 0.1);
+}
+
+test "flex row with gap adds spacing" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var px = ui.PaintContext.init(testing.allocator);
+    defer px.deinit();
+
+    const c1 = ui.div(alloc).bg(ui.Color.hex(0xFF0000)).size(50, 40).into_element();
+    const c2 = ui.div(alloc).bg(ui.Color.hex(0x00FF00)).size(50, 40).into_element();
+    const c3 = ui.div(alloc).bg(ui.Color.hex(0x0000FF)).size(50, 40).into_element();
+
+    const row = ui.div(alloc).flex_row().gap(10).child(c1).child(c2).child(c3).into_element();
+    _ = row.doLayout(ui.Constraints.tight(400, 200));
+    row.paint(&px, .{ .x = 0, .y = 0, .w = 400, .h = 200 });
+
+    // Positions: 0, 60 (50+10), 120 (50+10+50+10)
+    try testing.expectApproxEqAbs(@as(f32, 0), px.draw_list.quads.items[0].bounds[0], 0.1);
+    try testing.expectApproxEqAbs(@as(f32, 60), px.draw_list.quads.items[1].bounds[0], 0.1);
+    try testing.expectApproxEqAbs(@as(f32, 120), px.draw_list.quads.items[2].bounds[0], 0.1);
+}
+
+test "flex_grow distributes remaining space equally" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var px = ui.PaintContext.init(testing.allocator);
+    defer px.deinit();
+
+    const c1 = ui.div(alloc).bg(ui.Color.hex(0xFF0000)).grow(1).into_element();
+    const c2 = ui.div(alloc).bg(ui.Color.hex(0x00FF00)).grow(1).into_element();
+
+    const row = ui.div(alloc).flex_row().child(c1).child(c2).into_element();
+    _ = row.doLayout(ui.Constraints.tight(300, 100));
+    row.paint(&px, .{ .x = 0, .y = 0, .w = 300, .h = 100 });
+
+    try testing.expectApproxEqAbs(@as(f32, 150), px.draw_list.quads.items[0].bounds[2], 0.1);
+    try testing.expectApproxEqAbs(@as(f32, 150), px.draw_list.quads.items[1].bounds[2], 0.1);
+    try testing.expectApproxEqAbs(@as(f32, 0), px.draw_list.quads.items[0].bounds[0], 0.1);
+    try testing.expectApproxEqAbs(@as(f32, 150), px.draw_list.quads.items[1].bounds[0], 0.1);
+}
+
+test "flex_grow proportional distribution" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var px = ui.PaintContext.init(testing.allocator);
+    defer px.deinit();
+
+    // Fixed 100px child + two flex children (grow 1 and 2)
+    // Container: 400px. Remaining = 400 - 100 = 300
+    // grow(1) gets 100, grow(2) gets 200
+    const fixed = ui.div(alloc).bg(ui.Color.hex(0xFF0000)).width(100).into_element();
+    const flex1 = ui.div(alloc).bg(ui.Color.hex(0x00FF00)).grow(1).into_element();
+    const flex2 = ui.div(alloc).bg(ui.Color.hex(0x0000FF)).grow(2).into_element();
+
+    const row = ui.div(alloc).flex_row().child(fixed).child(flex1).child(flex2).into_element();
+    _ = row.doLayout(ui.Constraints.tight(400, 100));
+    row.paint(&px, .{ .x = 0, .y = 0, .w = 400, .h = 100 });
+
+    try testing.expectApproxEqAbs(@as(f32, 100), px.draw_list.quads.items[0].bounds[2], 0.1);
+    try testing.expectApproxEqAbs(@as(f32, 100), px.draw_list.quads.items[1].bounds[2], 0.1);
+    try testing.expectApproxEqAbs(@as(f32, 200), px.draw_list.quads.items[2].bounds[2], 0.1);
+}
+
+test "align_items center positions on cross axis" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var px = ui.PaintContext.init(testing.allocator);
+    defer px.deinit();
+
+    const c1 = ui.div(alloc).bg(ui.Color.hex(0xFF0000)).size(60, 40).into_element();
+    const row = ui.div(alloc).flex_row().align_center().child(c1).into_element();
+    _ = row.doLayout(ui.Constraints.tight(400, 200));
+    row.paint(&px, .{ .x = 0, .y = 0, .w = 400, .h = 200 });
+
+    // Center: y = (200 - 40) / 2 = 80
+    try testing.expectApproxEqAbs(@as(f32, 80), px.draw_list.quads.items[0].bounds[1], 0.1);
+}
+
+test "align_items stretch fills cross axis" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var px = ui.PaintContext.init(testing.allocator);
+    defer px.deinit();
+
+    const c1 = ui.div(alloc).bg(ui.Color.hex(0xFF0000)).width(60).into_element();
+    const row = ui.div(alloc).flex_row().child(c1).into_element();
+    _ = row.doLayout(ui.Constraints.tight(400, 200));
+    row.paint(&px, .{ .x = 0, .y = 0, .w = 400, .h = 200 });
+
+    // Default align_items is stretch → child height fills 200
+    try testing.expectApproxEqAbs(@as(f32, 200), px.draw_list.quads.items[0].bounds[3], 0.1);
+}
+
+test "align_self overrides align_items" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var px = ui.PaintContext.init(testing.allocator);
+    defer px.deinit();
+
+    const c1 = ui.div(alloc).bg(ui.Color.hex(0xFF0000)).size(60, 40).align_self(.end).into_element();
+    const row = ui.div(alloc).flex_row().align_center().child(c1).into_element();
+    _ = row.doLayout(ui.Constraints.tight(400, 200));
+    row.paint(&px, .{ .x = 0, .y = 0, .w = 400, .h = 200 });
+
+    // align_self: end → y = 200 - 40 = 160
+    try testing.expectApproxEqAbs(@as(f32, 160), px.draw_list.quads.items[0].bounds[1], 0.1);
+}
+
+test "justify_content center centers on main axis" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var px = ui.PaintContext.init(testing.allocator);
+    defer px.deinit();
+
+    const c1 = ui.div(alloc).bg(ui.Color.hex(0xFF0000)).size(100, 40).into_element();
+    const row = ui.div(alloc).flex_row().justify_center().child(c1).into_element();
+    _ = row.doLayout(ui.Constraints.tight(400, 200));
+    row.paint(&px, .{ .x = 0, .y = 0, .w = 400, .h = 200 });
+
+    // Center: x = (400 - 100) / 2 = 150
+    try testing.expectApproxEqAbs(@as(f32, 150), px.draw_list.quads.items[0].bounds[0], 0.1);
+}
+
+test "justify_content end aligns to end" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var px = ui.PaintContext.init(testing.allocator);
+    defer px.deinit();
+
+    const c1 = ui.div(alloc).bg(ui.Color.hex(0xFF0000)).size(100, 40).into_element();
+    const row = ui.div(alloc).flex_row().justify(.end).child(c1).into_element();
+    _ = row.doLayout(ui.Constraints.tight(400, 200));
+    row.paint(&px, .{ .x = 0, .y = 0, .w = 400, .h = 200 });
+
+    try testing.expectApproxEqAbs(@as(f32, 300), px.draw_list.quads.items[0].bounds[0], 0.1);
+}
+
+test "justify_content space_between distributes evenly" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var px = ui.PaintContext.init(testing.allocator);
+    defer px.deinit();
+
+    const c1 = ui.div(alloc).bg(ui.Color.hex(0xFF0000)).size(50, 40).into_element();
+    const c2 = ui.div(alloc).bg(ui.Color.hex(0x00FF00)).size(50, 40).into_element();
+    const c3 = ui.div(alloc).bg(ui.Color.hex(0x0000FF)).size(50, 40).into_element();
+
+    const row = ui.div(alloc).flex_row().justify(.space_between).child(c1).child(c2).child(c3).into_element();
+    _ = row.doLayout(ui.Constraints.tight(300, 100));
+    row.paint(&px, .{ .x = 0, .y = 0, .w = 300, .h = 100 });
+
+    // space_between: spacing = (300-150)/2 = 75
+    try testing.expectApproxEqAbs(@as(f32, 0), px.draw_list.quads.items[0].bounds[0], 0.1);
+    try testing.expectApproxEqAbs(@as(f32, 125), px.draw_list.quads.items[1].bounds[0], 0.1);
+    try testing.expectApproxEqAbs(@as(f32, 250), px.draw_list.quads.items[2].bounds[0], 0.1);
+}
+
+test "justify_content space_evenly distributes with equal gaps" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var px = ui.PaintContext.init(testing.allocator);
+    defer px.deinit();
+
+    const c1 = ui.div(alloc).bg(ui.Color.hex(0xFF0000)).size(50, 40).into_element();
+    const c2 = ui.div(alloc).bg(ui.Color.hex(0x00FF00)).size(50, 40).into_element();
+
+    const row = ui.div(alloc).flex_row().justify(.space_evenly).child(c1).child(c2).into_element();
+    _ = row.doLayout(ui.Constraints.tight(200, 100));
+    row.paint(&px, .{ .x = 0, .y = 0, .w = 200, .h = 100 });
+
+    // space_evenly: gap = (200-100)/3 = 33.33
+    try testing.expectApproxEqAbs(@as(f32, 33.33), px.draw_list.quads.items[0].bounds[0], 0.5);
+    try testing.expectApproxEqAbs(@as(f32, 116.67), px.draw_list.quads.items[1].bounds[0], 0.5);
+}
+
+test "auto-sized flex row shrink-wraps to children" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const c1 = ui.div(alloc).size(60, 30).into_element();
+    const c2 = ui.div(alloc).size(80, 50).into_element();
+
+    const row = ui.div(alloc).flex_row().gap(10).child(c1).child(c2).into_element();
+    const sz = row.doLayout(.{ .max_w = std.math.inf(f32), .max_h = std.math.inf(f32) });
+
+    // Width = 60 + 10 + 80 = 150, Height = max(30, 50) = 50
+    try testing.expectApproxEqAbs(@as(f32, 150), sz.w, 0.1);
+    try testing.expectApproxEqAbs(@as(f32, 50), sz.h, 0.1);
+}
+
+test "auto-sized flex column shrink-wraps to children" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const c1 = ui.div(alloc).size(60, 30).into_element();
+    const c2 = ui.div(alloc).size(80, 50).into_element();
+
+    const col = ui.div(alloc).flex_col().gap(5).child(c1).child(c2).into_element();
+    const sz = col.doLayout(.{ .max_w = std.math.inf(f32), .max_h = std.math.inf(f32) });
+
+    // Width = max(60, 80) = 80, Height = 30 + 5 + 50 = 85
+    try testing.expectApproxEqAbs(@as(f32, 80), sz.w, 0.1);
+    try testing.expectApproxEqAbs(@as(f32, 85), sz.h, 0.1);
+}
+
+test "flex_grow with gap distributes correctly" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var px = ui.PaintContext.init(testing.allocator);
+    defer px.deinit();
+
+    const c1 = ui.div(alloc).bg(ui.Color.hex(0xFF0000)).grow(1).into_element();
+    const c2 = ui.div(alloc).bg(ui.Color.hex(0x00FF00)).grow(1).into_element();
+
+    const row = ui.div(alloc).flex_row().gap(20).child(c1).child(c2).into_element();
+    _ = row.doLayout(ui.Constraints.tight(200, 100));
+    row.paint(&px, .{ .x = 0, .y = 0, .w = 200, .h = 100 });
+
+    // Available = 200 - 0 - 20 = 180, each gets 90
+    try testing.expectApproxEqAbs(@as(f32, 90), px.draw_list.quads.items[0].bounds[2], 0.1);
+    try testing.expectApproxEqAbs(@as(f32, 110), px.draw_list.quads.items[1].bounds[0], 0.1);
+    try testing.expectApproxEqAbs(@as(f32, 90), px.draw_list.quads.items[1].bounds[2], 0.1);
+}
+
+test "padding + flex layout" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var px = ui.PaintContext.init(testing.allocator);
+    defer px.deinit();
+
+    const c1 = ui.div(alloc).bg(ui.Color.hex(0xFF0000)).size(60, 40).into_element();
+    const row = ui.div(alloc)
+        .bg(ui.Color.hex(0x333333))
+        .flex_row()
+        .padding_all(20)
+        .child(c1)
+        .into_element();
+
+    _ = row.doLayout(ui.Constraints.tight(400, 200));
+    row.paint(&px, .{ .x = 0, .y = 0, .w = 400, .h = 200 });
+
+    try testing.expectEqual(@as(usize, 2), px.draw_list.quads.items.len);
+    try testing.expectApproxEqAbs(@as(f32, 20), px.draw_list.quads.items[1].bounds[0], 0.1);
+    try testing.expectApproxEqAbs(@as(f32, 20), px.draw_list.quads.items[1].bounds[1], 0.1);
+}
+
+test "nested flex containers" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var px = ui.PaintContext.init(testing.allocator);
+    defer px.deinit();
+
+    // Inner row with 2 items
+    const b1 = ui.div(alloc).bg(ui.Color.hex(0xFF0000)).size(40, 20).into_element();
+    const b2 = ui.div(alloc).bg(ui.Color.hex(0x00FF00)).size(40, 20).into_element();
+    const inner_row = ui.div(alloc).flex_row().gap(10).child(b1).child(b2).into_element();
+
+    // Outer column
+    const header = ui.div(alloc).bg(ui.Color.hex(0x0000FF)).size(200, 30).into_element();
+    const outer = ui.div(alloc).flex_col().child(header).child(inner_row).into_element();
+
+    _ = outer.doLayout(ui.Constraints.tight(200, 200));
+    outer.paint(&px, .{ .x = 0, .y = 0, .w = 200, .h = 200 });
+
+    // header at y=0, inner_row children at y=30
+    try testing.expectEqual(@as(usize, 3), px.draw_list.quads.items.len);
+    try testing.expectApproxEqAbs(@as(f32, 0), px.draw_list.quads.items[0].bounds[1], 0.1); // header y
+    try testing.expectApproxEqAbs(@as(f32, 30), px.draw_list.quads.items[1].bounds[1], 0.1); // b1 y
+    try testing.expectApproxEqAbs(@as(f32, 0), px.draw_list.quads.items[1].bounds[0], 0.1); // b1 x
+    try testing.expectApproxEqAbs(@as(f32, 50), px.draw_list.quads.items[2].bounds[0], 0.1); // b2 x
+    try testing.expectApproxEqAbs(@as(f32, 30), px.draw_list.quads.items[2].bounds[1], 0.1); // b2 y
+}
+
 // ── WindowContext tests ─────────────────────────────────────────────
 
 test "WindowContext init and deinit" {
