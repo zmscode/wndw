@@ -124,70 +124,39 @@ Ordered by impact. Each feature follows TDD: write tests first, then implement.
 
 ---
 
-## 12. Synthetic Drag Events for Text Selection
+## ~~12. Synthetic Drag Events for Text Selection~~ DONE
 
-**Why twelfth**: Smooth text selection during mouse drag needs position updates at regular intervals, not just on `mouseDragged:`.
-
-**Tests**:
-- During mouse drag, synthetic move events fire at ~60Hz
-- Events stop when mouse button is released
-- Events carry correct interpolated position
-
-**Implementation**:
-- On `mouseDragged:`, start a 16ms `dispatch_after` timer
-- Timer re-queries mouse position via `[NSEvent mouseLocation]` and pushes `.mouse_moved`
-- Cancel timer on `mouseUp:`
+- `Window.drag_timer: ?objc.id` NSTimer handle (null when inactive)
+- `mouseDragged:` view method starts a 16ms repeating NSTimer
+- `dragTimerFired:` queries `mouseLocationOutsideOfEventStream`, pushes `mouse_moved`
+- `mouseUp:` cancels the timer; `close()` also invalidates it on teardown
+- 5 tests in `synthetic_drag_test.zig`
 
 ---
 
-## 13. Window Ordering / Stacking
+## ~~13. Window Ordering / Stacking~~ DONE
 
-**Why thirteenth**: Multi-window apps need to know front-to-back order for rendering overlays, managing palettes.
-
-**Tests**:
-- `getWindowOrder()` returns windows in front-to-back order
-- Order updates after `focus()` or click-to-front
-- Minimized windows are excluded (or at end)
-
-**Implementation**:
-- Query `[NSApp orderedWindows]`
-- Filter to windows with `WndwWindowDelegate`
-- Map to `*Window` via `object_getInstanceVariable`
-- Return as slice (static buffer, same pattern as `getMonitors`)
+- `Window.getWindowOrder()` queries `[NSApp orderedWindows]`, filters to wndw
+  windows via delegate ivar, returns `[]const *Window` from static buffer
+- 2 tests in `window_order_test.zig`
 
 ---
 
-## 14. Appearance Observer (Live Theme Switching)
+## ~~14. Appearance Observer (Live Theme Switching)~~ DONE
 
-**Why fourteenth**: Complements feature #1. Apps should react in real-time when user toggles dark mode.
-
-**Tests**:
-- Theme change mid-run fires `.appearance_changed` event
-- Multiple windows each receive the event
-- Callback variant also fires
-
-**Implementation**:
-- Register `NSKeyValueObservation` on `[NSApp effectiveAppearance]`
-- On change, push `.appearance_changed` to all live windows
-- Note: may merge with feature #1 if KVO is set up there
+- Already covered by feature #1 (`NSDistributedNotificationCenter` broadcast to all live windows)
+- Added multi-window dispatch/callback integration tests
+- 5 tests in `appearance_observer_test.zig`
 
 ---
 
-## 15. Traffic Light Button Repositioning
+## ~~15. Traffic Light Button Repositioning~~ DONE
 
-**Why fifteenth**: Custom titlebar layouts (like Safari, Slack) need precise control over close/minimize/zoom button positions.
-
-**Tests**:
-- `win.setTrafficLightPosition(x, y)` moves buttons
-- Position is relative to window's top-left
-- Position updates correctly after resize
-- Position resets on fullscreen enter/exit
-
-**Implementation**:
-- Query `[window standardWindowButton:NSWindowCloseButton]` etc.
-- Set `frame.origin` on each button's superview
-- Re-apply in `windowDidResize:` delegate callback
-- Store offset in `Window` struct; apply `nil` to disable
+- `Window.traffic_light_offset: ?event.Position` stores the override (null = AppKit default)
+- `setTrafficLightPosition(x, y)` positions the button container superview from top-left
+- `resetTrafficLightPosition()` clears the override
+- `apply_traffic_light_position()` private helper re-applied on every `windowDidResize:`
+- 6 tests in `traffic_light_test.zig`
 
 ---
 

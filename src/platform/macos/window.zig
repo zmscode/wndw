@@ -1345,9 +1345,15 @@ pub const Window = struct {
         return S.buf[0..n];
     }
 
-    /// Move the traffic-light (close/minimise/zoom) buttons to the given
-    /// position relative to the window's top-left corner. Re-applied
-    /// automatically on every resize.
+    /// Reposition the traffic-light (close/minimise/zoom) buttons.
+    ///
+    /// `x` and `y` are in the titlebar container's coordinate system:
+    ///   - `x` = pixels from the left edge of the titlebar (close button).
+    ///     Buttons are then spaced 20pt apart: mini at x+20, zoom at x+40.
+    ///   - `y` = pixels from the BOTTOM of the titlebar container (Cocoa
+    ///     bottom-left). The default position is approximately (7, 7).
+    ///
+    /// Re-applied automatically on every resize.
     pub fn setTrafficLightPosition(win: *Window, x: i32, y: i32) void {
         win.traffic_light_offset = .{ .x = x, .y = y };
         apply_traffic_light_position(win);
@@ -1609,23 +1615,23 @@ pub fn ctrl_synthesize(button: event.MouseButton, ctrl_held: bool) event.MouseBu
 /// No-op when `traffic_light_offset == null`.
 fn apply_traffic_light_position(win: *Window) void {
     const offset = win.traffic_light_offset orelse return;
-    // NSWindowCloseButton = 0.  The three buttons share a container superview.
+    // Each button is positioned individually within its superview.
+    // Coordinates are in the button superview's space (Cocoa bottom-left):
+    //   x = pixels from left edge of titlebar
+    //   y = pixels from bottom of titlebar container (default ≈ 7)
+    // Buttons are spaced 20pt apart horizontally starting at offset.x.
     const FnBtn = fn (objc.id, objc.SEL, objc.NSUInteger) callconv(.c) ?objc.id;
     const fn_btn: *const FnBtn = @ptrCast(&objc.objc_msgSend);
-    const close_btn = fn_btn(win.ns_window, objc.sel_registerName("standardWindowButton:"), 0) orelse return;
-    const superview: ?objc.id = objc.msgSend(?objc.id, close_btn, "superview", .{});
-    const sv = superview orelse return;
-    const FnRect = fn (objc.id, objc.SEL) callconv(.c) objc.NSRect;
-    const fn_frame: *const FnRect = @ptrCast(&objc.objc_msgSend);
-    const sv_frame = fn_frame(sv, objc.sel_registerName("frame"));
-    // Cocoa Y is bottom-left; convert from top-left origin.
-    const new_y = @as(f64, @floatFromInt(win.h)) - @as(f64, @floatFromInt(offset.y)) - sv_frame.size.height;
     const FnSetOrigin = fn (objc.id, objc.SEL, objc.NSPoint) callconv(.c) void;
     const fn_set: *const FnSetOrigin = @ptrCast(&objc.objc_msgSend);
-    fn_set(sv, objc.sel_registerName("setFrameOrigin:"), .{
-        .x = @floatFromInt(offset.x),
-        .y = new_y,
-    });
+    const tags: [3]objc.NSUInteger = .{ 0, 1, 2 }; // close, mini, zoom
+    for (tags, 0..) |tag, idx| {
+        const btn = fn_btn(win.ns_window, objc.sel_registerName("standardWindowButton:"), tag) orelse continue;
+        fn_set(btn, objc.sel_registerName("setFrameOrigin:"), .{
+            .x = @as(f64, @floatFromInt(offset.x)) + @as(f64, @floatFromInt(idx)) * 20.0,
+            .y = @floatFromInt(offset.y),
+        });
+    }
 }
 
 // ── Background helpers ────────────────────────────────────────────────────────
