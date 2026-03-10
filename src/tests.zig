@@ -25,4 +25,8 @@ comptime {
     _ = @import("tests/ctrl_click_test.zig");
     _ = @import("tests/first_mouse_test.zig");
     _ = @import("tests/drag_position_test.zig");
+    _ = @import("tests/synthetic_drag_test.zig");
+    _ = @import("tests/window_order_test.zig");
+    _ = @import("tests/appearance_observer_test.zig");
+    _ = @import("tests/traffic_light_test.zig");
 }

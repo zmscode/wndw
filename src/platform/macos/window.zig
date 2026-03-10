@@ -420,6 +420,12 @@ pub const Window = struct {
     display_link: ?*anyopaque = null,
     /// Atomic flag set by the CVDisplayLink callback on vsync, cleared by `waitForFrame`.
     frame_ready: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    /// NSTimer used for synthetic 60Hz mouse-move events during left-button drag.
+    /// Non-null while a drag is in progress. Invalidated on mouseUp: and close().
+    drag_timer: ?objc.id = null,
+    /// Stored traffic-light button offset from the window's top-left corner.
+    /// `null` means use AppKit's default position.
+    traffic_light_offset: ?event.Position = null,
 
     /// OpenGL function pointer type with the alignment that zgl expects.
     /// Matches `zgl.binding.FunctionPointer` so `glGetProcAddress` can be
@@ -692,6 +698,10 @@ pub const Window = struct {
     pub fn close(win: *Window) void {
         unregister_live_window(win);
         win.destroyDisplayLink();
+        if (win.drag_timer) |timer| {
+            objc.msgSend(void, timer, "invalidate", .{});
+            win.drag_timer = null;
+        }
         win.deleteContext();
         win.releaseDropStrings();
         objc.msgSend(void, win.ns_window, "setDelegate:", .{@as(?objc.id, null)});
@@ -1304,6 +1314,51 @@ pub const Window = struct {
         fn_set(win.ns_window, objc.sel_registerName("setFrame:display:"), new_frame, objc.YES);
     }
 
+    /// Returns the live wndw windows in front-to-back stacking order.
+    ///
+    /// Queries `[NSApp orderedWindows]`, filters to windows whose delegate
+    /// holds a `wndw_win` ivar, and maps each to its `*Window`. Returns a
+    /// slice into a static buffer — copy if you need the order to outlive
+    /// the next call.
+    pub fn getWindowOrder(_: *Window) []const *Window {
+        const S = struct {
+            var buf: [MAX_LIVE_WINDOWS]*Window = undefined;
+        };
+        const ordered = objc.msgSend(objc.id, g.app, "orderedWindows", .{});
+        const count = objc.msgSend(objc.NSUInteger, ordered, "count", .{});
+        const FnObjAtIdx = fn (objc.id, objc.SEL, objc.NSUInteger) callconv(.c) objc.id;
+        const fn_idx: *const FnObjAtIdx = @ptrCast(&objc.objc_msgSend);
+        var n: usize = 0;
+        var i: objc.NSUInteger = 0;
+        while (i < count and n < MAX_LIVE_WINDOWS) : (i += 1) {
+            const ns_win = fn_idx(ordered, objc.sel_registerName("objectAtIndex:"), i);
+            const del: ?objc.id = objc.msgSend(?objc.id, ns_win, "delegate", .{});
+            if (del) |delegate| {
+                var ptr: ?*anyopaque = null;
+                _ = objc.object_getInstanceVariable(delegate, "wndw_win", &ptr);
+                if (ptr) |p| {
+                    S.buf[n] = @ptrCast(@alignCast(p));
+                    n += 1;
+                }
+            }
+        }
+        return S.buf[0..n];
+    }
+
+    /// Move the traffic-light (close/minimise/zoom) buttons to the given
+    /// position relative to the window's top-left corner. Re-applied
+    /// automatically on every resize.
+    pub fn setTrafficLightPosition(win: *Window, x: i32, y: i32) void {
+        win.traffic_light_offset = .{ .x = x, .y = y };
+        apply_traffic_light_position(win);
+    }
+
+    /// Restore the traffic-light buttons to AppKit's default position.
+    /// The visual reset takes effect on the next resize or redraw.
+    pub fn resetTrafficLightPosition(win: *Window) void {
+        win.traffic_light_offset = null;
+    }
+
     // ── OpenGL context ────────────────────────────────────────────────────
 
     /// Create an NSOpenGL context and attach it to this window's view.
@@ -1546,6 +1601,31 @@ pub const Window = struct {
 pub fn ctrl_synthesize(button: event.MouseButton, ctrl_held: bool) event.MouseButton {
     if (ctrl_held and button == .left) return .right;
     return button;
+}
+
+// ── Traffic-light button repositioning ───────────────────────────────────────
+
+/// Apply the stored `traffic_light_offset` to the window's traffic-light buttons.
+/// No-op when `traffic_light_offset == null`.
+fn apply_traffic_light_position(win: *Window) void {
+    const offset = win.traffic_light_offset orelse return;
+    // NSWindowCloseButton = 0.  The three buttons share a container superview.
+    const FnBtn = fn (objc.id, objc.SEL, objc.NSUInteger) callconv(.c) ?objc.id;
+    const fn_btn: *const FnBtn = @ptrCast(&objc.objc_msgSend);
+    const close_btn = fn_btn(win.ns_window, objc.sel_registerName("standardWindowButton:"), 0) orelse return;
+    const superview: ?objc.id = objc.msgSend(?objc.id, close_btn, "superview", .{});
+    const sv = superview orelse return;
+    const FnRect = fn (objc.id, objc.SEL) callconv(.c) objc.NSRect;
+    const fn_frame: *const FnRect = @ptrCast(&objc.objc_msgSend);
+    const sv_frame = fn_frame(sv, objc.sel_registerName("frame"));
+    // Cocoa Y is bottom-left; convert from top-left origin.
+    const new_y = @as(f64, @floatFromInt(win.h)) - @as(f64, @floatFromInt(offset.y)) - sv_frame.size.height;
+    const FnSetOrigin = fn (objc.id, objc.SEL, objc.NSPoint) callconv(.c) void;
+    const fn_set: *const FnSetOrigin = @ptrCast(&objc.objc_msgSend);
+    fn_set(sv, objc.sel_registerName("setFrameOrigin:"), .{
+        .x = @floatFromInt(offset.x),
+        .y = new_y,
+    });
 }
 
 // ── Background helpers ────────────────────────────────────────────────────────
@@ -2067,6 +2147,9 @@ fn setup_view_class() !void {
     _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("acceptsFirstMouse:"), @ptrCast(&view_accepts_first_mouse), "B@:@");
     _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("mouseEntered:"), @ptrCast(&view_mouse_entered), "v@:@");
     _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("mouseExited:"), @ptrCast(&view_mouse_exited), "v@:@");
+    _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("mouseDragged:"), @ptrCast(&view_mouse_dragged), "v@:@");
+    _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("mouseUp:"), @ptrCast(&view_mouse_up), "v@:@");
+    _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("dragTimerFired:"), @ptrCast(&view_drag_timer_fired), "v@:@");
     _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("drawRect:"), @ptrCast(&view_draw_rect), "v@:{CGRect={CGPoint=dd}{CGSize=dd}}");
     _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("viewDidChangeBackingProperties"), @ptrCast(&view_did_change_backing_properties), "v@:");
     _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("draggingEntered:"), @ptrCast(&view_dragging_entered), "Q@:@");
@@ -2121,6 +2204,7 @@ fn delegate_window_did_resize(self: objc.id, _: objc.SEL, _: objc.id) callconv(.
     win.h = @intFromFloat(frame.size.height);
     win.queue.push(.{ .resized = .{ .w = win.w, .h = win.h } });
     win.updateGLContextIfNeeded();
+    apply_traffic_light_position(win);
     if (objc.msgSend(objc.BOOL, win.ns_window, "isZoomed", .{}) != objc.NO) {
         win.queue.push(.maximized);
     }
@@ -2218,6 +2302,47 @@ fn view_mouse_entered(self: objc.id, _: objc.SEL, _: objc.id) callconv(.c) void 
 /// `mouseExited:` — cursor left the view's tracking area.
 fn view_mouse_exited(self: objc.id, _: objc.SEL, _: objc.id) callconv(.c) void {
     if (get_win_from_view(self)) |win| win.queue.push(.mouse_left);
+}
+
+/// `mouseDragged:` — left-button drag. Start a 16ms repeating NSTimer to
+/// synthesise `mouse_moved` events at ~60Hz for smooth text selection.
+fn view_mouse_dragged(self: objc.id, _: objc.SEL, _: objc.id) callconv(.c) void {
+    const win = get_win_from_view(self) orelse return;
+    if (win.drag_timer != null) return; // already running
+    const FnTimer = fn (objc.id, objc.SEL, objc.CGFloat, objc.id, objc.SEL, ?objc.id, objc.BOOL) callconv(.c) ?objc.id;
+    const fn_timer: *const FnTimer = @ptrCast(&objc.objc_msgSend);
+    const timer = fn_timer(
+        objc.ns_class("NSTimer"),
+        objc.sel_registerName("scheduledTimerWithTimeInterval:target:selector:userInfo:repeats:"),
+        @as(objc.CGFloat, 0.016),
+        self,
+        objc.sel_registerName("dragTimerFired:"),
+        @as(?objc.id, null),
+        objc.YES,
+    );
+    win.drag_timer = timer;
+}
+
+/// `mouseUp:` — left button released. Cancel the drag-synthesis timer.
+fn view_mouse_up(self: objc.id, _: objc.SEL, _: objc.id) callconv(.c) void {
+    const win = get_win_from_view(self) orelse return;
+    if (win.drag_timer) |timer| {
+        objc.msgSend(void, timer, "invalidate", .{});
+        win.drag_timer = null;
+    }
+}
+
+/// `dragTimerFired:` — called every ~16ms during drag. Queries the current
+/// mouse position via `[NSWindow mouseLocationOutsideOfEventStream]` and
+/// pushes a synthetic `mouse_moved` event.
+fn view_drag_timer_fired(self: objc.id, _: objc.SEL, _: objc.id) callconv(.c) void {
+    const win = get_win_from_view(self) orelse return;
+    const FnPt = fn (objc.id, objc.SEL) callconv(.c) objc.NSPoint;
+    const fn_pt: *const FnPt = @ptrCast(&objc.objc_msgSend);
+    const loc = fn_pt(win.ns_window, objc.sel_registerName("mouseLocationOutsideOfEventStream"));
+    const x: i32 = @intFromFloat(loc.x);
+    const y: i32 = win.h - @as(i32, @intFromFloat(loc.y));
+    win.queue.push(.{ .mouse_moved = .{ .x = x, .y = y } });
 }
 
 /// `drawRect:` — the view needs a redraw.
