@@ -239,36 +239,21 @@ pub fn main() !void {
             }
         }
 
-        // Poll child windows for close requests
-        if (floating_win) |fw| {
-            while (fw.poll()) |cev| {
-                if (cev == .close_requested) {
-                    fw.close();
-                    floating_win = null;
-                    std.debug.print("floating window closed\n", .{});
-                    break;
-                }
-            }
-        }
-        if (popup_win) |pw| {
-            while (pw.poll()) |cev| {
-                if (cev == .close_requested) {
-                    pw.close();
-                    popup_win = null;
-                    std.debug.print("popup window closed\n", .{});
-                    break;
-                }
-            }
-        }
-        if (dialog_win) |dw| {
-            while (dw.poll()) |cev| {
-                if (cev == .close_requested) {
-                    dw.close();
-                    dialog_win = null;
-                    std.debug.print("dialog closed\n", .{});
-                    break;
-                }
-            }
-        }
+        // Check if child windows were closed via their close button
+        if (floating_win) |fw| if (fw.shouldClose()) {
+            fw.close();
+            floating_win = null;
+            std.debug.print("floating window closed\n", .{});
+        };
+        if (popup_win) |pw| if (pw.shouldClose()) {
+            pw.close();
+            popup_win = null;
+            std.debug.print("popup window closed\n", .{});
+        };
+        if (dialog_win) |dw| if (dw.shouldClose()) {
+            dw.close();
+            dialog_win = null;
+            std.debug.print("dialog closed\n", .{});
+        };
     }
 }

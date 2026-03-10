@@ -1883,14 +1883,18 @@ fn get_win_from_delegate(delegate: objc.id) ?*Window {
 }
 
 /// `windowShouldClose:` — close button or Cmd+W.
+/// If an `on_close_requested` callback is set, the event is enqueued and
+/// AppKit is told NOT to close (the user decides by calling `win.quit()`).
+/// Otherwise, `should_close` is set automatically so the window closes
+/// without requiring manual polling — child windows "just work."
 fn delegate_window_should_close(self: objc.id, _: objc.SEL, _: objc.id) callconv(.c) objc.BOOL {
     if (get_win_from_delegate(self)) |win| {
-        // Do NOT set should_close here — let user code decide by calling
-        // win.quit() from the event handler or callback.
         win.queue.push(.close_requested);
+        if (win.callbacks.on_close_requested.func == null) {
+            win.should_close = true;
+            return objc.YES;
+        }
     }
-    // Return NO so AppKit does not proceed to close the window automatically.
-    // The user must call win.quit() to actually close.
     return objc.NO;
 }
 
