@@ -31,21 +31,14 @@ Ordered by impact. Each feature follows TDD: write tests first, then implement.
 
 ---
 
-## 3. Callbacks with Context
+## ~~3. Callbacks with Context~~ DONE
 
-**Why third**: Bare `fn` pointers force users into global state or `@ptrCast` hacks. Blocks ergonomic use of the callback system.
-
-**Tests**:
-- Callback receives user-provided context pointer
-- Multiple windows with different contexts get correct pointer
-- Setting a callback to `null` removes it
-- Context pointer lifetime is caller-managed (no use-after-free by design)
-
-**Implementation**:
-- Change callback signatures from `?*const fn(Event) void` to `?*const fn(*anyopaque, Event) void`
-- Store context pointer alongside each callback
-- Alternative: single `ctx: ?*anyopaque` on the `Callbacks` struct (simpler, matches `setUserPtr` pattern)
-- Update all `setOn*` methods to accept context parameter
+- All 23 callback slots now hold `func + ctx` pairs via generic `Cb(Arg)` and `CbVoid` types
+- `setOn*(ctx, fn)` — context is `?*anyopaque`, passed as first arg to callback
+- `dispatchEvent` uses `.call()` method on each slot (null-check + invoke)
+- Breaking change: all callback function signatures now take `?*anyopaque` as first param
+- 8 tests in `callback_context_test.zig` (context delivery, multi-window, null safety)
+- Existing `event_callbacks_test.zig` updated for new signatures
 
 ---
 

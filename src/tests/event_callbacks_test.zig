@@ -1,8 +1,8 @@
-/// Tests for event callbacks (Phase 11).
+/// Tests for event callbacks.
 ///
 /// Callback function pointers stored on Window. Each setter stores a fn ptr
-/// that fires during dispatchEvent() (called by poll()). Tests use
-/// dispatchEvent() directly to avoid pulling in ObjC linker symbols.
+/// plus a context pointer that fires during dispatchEvent() (called by poll()).
+/// Tests use dispatchEvent() directly to avoid pulling in ObjC linker symbols.
 const std = @import("std");
 const Window = @import("../platform/macos/window.zig").Window;
 const ev = @import("../event.zig");
@@ -68,7 +68,7 @@ test "Window: callbacks field exists" {
 var test_key_count: u32 = 0;
 var test_last_key: ev.Key = .unknown;
 
-fn testKeyCallback(kp: ev.KeyEvent) void {
+fn testKeyCallback(_: ?*anyopaque, kp: ev.KeyEvent) void {
     test_key_count += 1;
     test_last_key = kp.key;
 }
@@ -81,7 +81,7 @@ test "Callback: setOnKeyPress fires on dispatchEvent" {
     w.callbacks = .{};
     w.input_state = .{};
 
-    w.setOnKeyPress(testKeyCallback);
+    w.setOnKeyPress(null, testKeyCallback);
     w.dispatchEvent(.{ .key_pressed = .{ .key = .escape } });
 
     try std.testing.expectEqual(@as(u32, 1), test_key_count);
@@ -91,7 +91,7 @@ test "Callback: setOnKeyPress fires on dispatchEvent" {
 var test_mouse_btn: ev.MouseButton = .left;
 var test_mouse_count: u32 = 0;
 
-fn testMouseCallback(btn: ev.MouseButton) void {
+fn testMouseCallback(_: ?*anyopaque, btn: ev.MouseButton) void {
     test_mouse_count += 1;
     test_mouse_btn = btn;
 }
@@ -103,7 +103,7 @@ test "Callback: setOnMousePress fires on dispatchEvent" {
     w.callbacks = .{};
     w.input_state = .{};
 
-    w.setOnMousePress(testMouseCallback);
+    w.setOnMousePress(null, testMouseCallback);
     w.dispatchEvent(.{ .mouse_pressed = .right });
 
     try std.testing.expectEqual(@as(u32, 1), test_mouse_count);
@@ -113,7 +113,7 @@ test "Callback: setOnMousePress fires on dispatchEvent" {
 var test_resize_w: i32 = 0;
 var test_resize_h: i32 = 0;
 
-fn testResizeCallback(size: ev.Size) void {
+fn testResizeCallback(_: ?*anyopaque, size: ev.Size) void {
     test_resize_w = size.w;
     test_resize_h = size.h;
 }
@@ -126,7 +126,7 @@ test "Callback: setOnResize fires on dispatchEvent" {
     w.callbacks = .{};
     w.input_state = .{};
 
-    w.setOnResize(testResizeCallback);
+    w.setOnResize(null, testResizeCallback);
     w.dispatchEvent(.{ .resized = .{ .w = 1024, .h = 768 } });
 
     try std.testing.expectEqual(@as(i32, 1024), test_resize_w);
@@ -135,7 +135,7 @@ test "Callback: setOnResize fires on dispatchEvent" {
 
 var test_void_count: u32 = 0;
 
-fn testVoidCallback() void {
+fn testVoidCallback(_: ?*anyopaque) void {
     test_void_count += 1;
 }
 
@@ -146,7 +146,7 @@ test "Callback: setOnFocusGained fires on dispatchEvent" {
     w.callbacks = .{};
     w.input_state = .{};
 
-    w.setOnFocusGained(testVoidCallback);
+    w.setOnFocusGained(null, testVoidCallback);
     w.dispatchEvent(.focus_gained);
 
     try std.testing.expectEqual(@as(u32, 1), test_void_count);

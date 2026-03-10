@@ -288,145 +288,145 @@ pub const Window = struct {
     ///
     /// Callbacks fire synchronously — they execute inline during `poll()`,
     /// so keep them fast to avoid stalling the event loop.
-    pub const Callbacks = struct {
-        on_key_press: ?*const fn (event.KeyEvent) void = null,
-        on_key_release: ?*const fn (event.KeyEvent) void = null,
-        on_mouse_press: ?*const fn (event.MouseButton) void = null,
-        on_mouse_release: ?*const fn (event.MouseButton) void = null,
-        on_mouse_move: ?*const fn (event.Position) void = null,
-        on_scroll: ?*const fn (event.ScrollDelta) void = null,
-        on_resize: ?*const fn (event.Size) void = null,
-        on_move: ?*const fn (event.Position) void = null,
-        on_focus_gained: ?*const fn () void = null,
-        on_focus_lost: ?*const fn () void = null,
-        on_close_requested: ?*const fn () void = null,
-        on_minimized: ?*const fn () void = null,
-        on_restored: ?*const fn () void = null,
-        on_maximized: ?*const fn () void = null,
-        on_mouse_entered: ?*const fn () void = null,
-        on_mouse_left: ?*const fn () void = null,
-        on_refresh_requested: ?*const fn () void = null,
-        on_scale_changed: ?*const fn (f32) void = null,
-        on_file_drop_started: ?*const fn () void = null,
-        on_file_dropped: ?*const fn (u32) void = null,
-        on_file_drop_left: ?*const fn () void = null,
-        on_text_input: ?*const fn (event.TextInput) void = null,
-        on_appearance_changed: ?*const fn (event.Appearance) void = null,
+    /// A callback slot holding a function pointer and an opaque user context.
+    /// The context pointer is passed as the first argument to the callback.
+    fn Cb(comptime Arg: type) type {
+        return struct {
+            func: ?*const fn (?*anyopaque, Arg) void = null,
+            ctx: ?*anyopaque = null,
+
+            pub inline fn call(self: @This(), arg: Arg) void {
+                if (self.func) |f| f(self.ctx, arg);
+            }
+        };
+    }
+
+    /// Callback slot for events with no payload.
+    const CbVoid = struct {
+        func: ?*const fn (?*anyopaque) void = null,
+        ctx: ?*anyopaque = null,
+
+        pub inline fn call(self: CbVoid) void {
+            if (self.func) |f| f(self.ctx);
+        }
     };
 
-    /// Register a callback for key press events.
-    pub fn setOnKeyPress(win: *Window, cb: ?*const fn (event.KeyEvent) void) void {
-        win.callbacks.on_key_press = cb;
+    pub const Callbacks = struct {
+        on_key_press: Cb(event.KeyEvent) = .{},
+        on_key_release: Cb(event.KeyEvent) = .{},
+        on_mouse_press: Cb(event.MouseButton) = .{},
+        on_mouse_release: Cb(event.MouseButton) = .{},
+        on_mouse_move: Cb(event.Position) = .{},
+        on_scroll: Cb(event.ScrollDelta) = .{},
+        on_resize: Cb(event.Size) = .{},
+        on_move: Cb(event.Position) = .{},
+        on_focus_gained: CbVoid = .{},
+        on_focus_lost: CbVoid = .{},
+        on_close_requested: CbVoid = .{},
+        on_minimized: CbVoid = .{},
+        on_restored: CbVoid = .{},
+        on_maximized: CbVoid = .{},
+        on_mouse_entered: CbVoid = .{},
+        on_mouse_left: CbVoid = .{},
+        on_refresh_requested: CbVoid = .{},
+        on_scale_changed: Cb(f32) = .{},
+        on_file_drop_started: CbVoid = .{},
+        on_file_dropped: Cb(u32) = .{},
+        on_file_drop_left: CbVoid = .{},
+        on_text_input: Cb(event.TextInput) = .{},
+        on_appearance_changed: Cb(event.Appearance) = .{},
+    };
+
+    pub fn setOnKeyPress(win: *Window, ctx: ?*anyopaque, cb: ?*const fn (?*anyopaque, event.KeyEvent) void) void {
+        win.callbacks.on_key_press = .{ .func = cb, .ctx = ctx };
     }
 
-    /// Register a callback for key release events.
-    pub fn setOnKeyRelease(win: *Window, cb: ?*const fn (event.KeyEvent) void) void {
-        win.callbacks.on_key_release = cb;
+    pub fn setOnKeyRelease(win: *Window, ctx: ?*anyopaque, cb: ?*const fn (?*anyopaque, event.KeyEvent) void) void {
+        win.callbacks.on_key_release = .{ .func = cb, .ctx = ctx };
     }
 
-    /// Register a callback for mouse button press events.
-    pub fn setOnMousePress(win: *Window, cb: ?*const fn (event.MouseButton) void) void {
-        win.callbacks.on_mouse_press = cb;
+    pub fn setOnMousePress(win: *Window, ctx: ?*anyopaque, cb: ?*const fn (?*anyopaque, event.MouseButton) void) void {
+        win.callbacks.on_mouse_press = .{ .func = cb, .ctx = ctx };
     }
 
-    /// Register a callback for mouse button release events.
-    pub fn setOnMouseRelease(win: *Window, cb: ?*const fn (event.MouseButton) void) void {
-        win.callbacks.on_mouse_release = cb;
+    pub fn setOnMouseRelease(win: *Window, ctx: ?*anyopaque, cb: ?*const fn (?*anyopaque, event.MouseButton) void) void {
+        win.callbacks.on_mouse_release = .{ .func = cb, .ctx = ctx };
     }
 
-    /// Register a callback for mouse movement events.
-    pub fn setOnMouseMove(win: *Window, cb: ?*const fn (event.Position) void) void {
-        win.callbacks.on_mouse_move = cb;
+    pub fn setOnMouseMove(win: *Window, ctx: ?*anyopaque, cb: ?*const fn (?*anyopaque, event.Position) void) void {
+        win.callbacks.on_mouse_move = .{ .func = cb, .ctx = ctx };
     }
 
-    /// Register a callback for scroll wheel events.
-    pub fn setOnScroll(win: *Window, cb: ?*const fn (event.ScrollDelta) void) void {
-        win.callbacks.on_scroll = cb;
+    pub fn setOnScroll(win: *Window, ctx: ?*anyopaque, cb: ?*const fn (?*anyopaque, event.ScrollDelta) void) void {
+        win.callbacks.on_scroll = .{ .func = cb, .ctx = ctx };
     }
 
-    /// Register a callback for window resize events.
-    pub fn setOnResize(win: *Window, cb: ?*const fn (event.Size) void) void {
-        win.callbacks.on_resize = cb;
+    pub fn setOnResize(win: *Window, ctx: ?*anyopaque, cb: ?*const fn (?*anyopaque, event.Size) void) void {
+        win.callbacks.on_resize = .{ .func = cb, .ctx = ctx };
     }
 
-    /// Register a callback for window move events.
-    pub fn setOnMove(win: *Window, cb: ?*const fn (event.Position) void) void {
-        win.callbacks.on_move = cb;
+    pub fn setOnMove(win: *Window, ctx: ?*anyopaque, cb: ?*const fn (?*anyopaque, event.Position) void) void {
+        win.callbacks.on_move = .{ .func = cb, .ctx = ctx };
     }
 
-    /// Register a callback for when the window gains keyboard focus.
-    pub fn setOnFocusGained(win: *Window, cb: ?*const fn () void) void {
-        win.callbacks.on_focus_gained = cb;
+    pub fn setOnFocusGained(win: *Window, ctx: ?*anyopaque, cb: ?*const fn (?*anyopaque) void) void {
+        win.callbacks.on_focus_gained = .{ .func = cb, .ctx = ctx };
     }
 
-    /// Register a callback for when the window loses keyboard focus.
-    pub fn setOnFocusLost(win: *Window, cb: ?*const fn () void) void {
-        win.callbacks.on_focus_lost = cb;
+    pub fn setOnFocusLost(win: *Window, ctx: ?*anyopaque, cb: ?*const fn (?*anyopaque) void) void {
+        win.callbacks.on_focus_lost = .{ .func = cb, .ctx = ctx };
     }
 
-    /// Register a callback for close requests (close button or Cmd+W).
-    pub fn setOnCloseRequested(win: *Window, cb: ?*const fn () void) void {
-        win.callbacks.on_close_requested = cb;
+    pub fn setOnCloseRequested(win: *Window, ctx: ?*anyopaque, cb: ?*const fn (?*anyopaque) void) void {
+        win.callbacks.on_close_requested = .{ .func = cb, .ctx = ctx };
     }
 
-    /// Register a callback for when the window is minimised to the dock.
-    pub fn setOnMinimized(win: *Window, cb: ?*const fn () void) void {
-        win.callbacks.on_minimized = cb;
+    pub fn setOnMinimized(win: *Window, ctx: ?*anyopaque, cb: ?*const fn (?*anyopaque) void) void {
+        win.callbacks.on_minimized = .{ .func = cb, .ctx = ctx };
     }
 
-    /// Register a callback for when the window is restored from the dock.
-    pub fn setOnRestored(win: *Window, cb: ?*const fn () void) void {
-        win.callbacks.on_restored = cb;
+    pub fn setOnRestored(win: *Window, ctx: ?*anyopaque, cb: ?*const fn (?*anyopaque) void) void {
+        win.callbacks.on_restored = .{ .func = cb, .ctx = ctx };
     }
 
-    /// Register a callback for when the window is maximised (zoomed).
-    pub fn setOnMaximized(win: *Window, cb: ?*const fn () void) void {
-        win.callbacks.on_maximized = cb;
+    pub fn setOnMaximized(win: *Window, ctx: ?*anyopaque, cb: ?*const fn (?*anyopaque) void) void {
+        win.callbacks.on_maximized = .{ .func = cb, .ctx = ctx };
     }
 
-    /// Register a callback for when the mouse enters the window.
-    pub fn setOnMouseEntered(win: *Window, cb: ?*const fn () void) void {
-        win.callbacks.on_mouse_entered = cb;
+    pub fn setOnMouseEntered(win: *Window, ctx: ?*anyopaque, cb: ?*const fn (?*anyopaque) void) void {
+        win.callbacks.on_mouse_entered = .{ .func = cb, .ctx = ctx };
     }
 
-    /// Register a callback for when the mouse leaves the window.
-    pub fn setOnMouseLeft(win: *Window, cb: ?*const fn () void) void {
-        win.callbacks.on_mouse_left = cb;
+    pub fn setOnMouseLeft(win: *Window, ctx: ?*anyopaque, cb: ?*const fn (?*anyopaque) void) void {
+        win.callbacks.on_mouse_left = .{ .func = cb, .ctx = ctx };
     }
 
-    /// Register a callback for redraw requests.
-    pub fn setOnRefreshRequested(win: *Window, cb: ?*const fn () void) void {
-        win.callbacks.on_refresh_requested = cb;
+    pub fn setOnRefreshRequested(win: *Window, ctx: ?*anyopaque, cb: ?*const fn (?*anyopaque) void) void {
+        win.callbacks.on_refresh_requested = .{ .func = cb, .ctx = ctx };
     }
 
-    /// Register a callback for backing scale changes (e.g. moved to Retina display).
-    pub fn setOnScaleChanged(win: *Window, cb: ?*const fn (f32) void) void {
-        win.callbacks.on_scale_changed = cb;
+    pub fn setOnScaleChanged(win: *Window, ctx: ?*anyopaque, cb: ?*const fn (?*anyopaque, f32) void) void {
+        win.callbacks.on_scale_changed = .{ .func = cb, .ctx = ctx };
     }
 
-    /// Register a callback for when a file drag enters the window.
-    pub fn setOnFileDropStarted(win: *Window, cb: ?*const fn () void) void {
-        win.callbacks.on_file_drop_started = cb;
+    pub fn setOnFileDropStarted(win: *Window, ctx: ?*anyopaque, cb: ?*const fn (?*anyopaque) void) void {
+        win.callbacks.on_file_drop_started = .{ .func = cb, .ctx = ctx };
     }
 
-    /// Register a callback for when files are dropped on the window.
-    pub fn setOnFileDropped(win: *Window, cb: ?*const fn (u32) void) void {
-        win.callbacks.on_file_dropped = cb;
+    pub fn setOnFileDropped(win: *Window, ctx: ?*anyopaque, cb: ?*const fn (?*anyopaque, u32) void) void {
+        win.callbacks.on_file_dropped = .{ .func = cb, .ctx = ctx };
     }
 
-    /// Register a callback for when a file drag leaves the window.
-    pub fn setOnFileDropLeft(win: *Window, cb: ?*const fn () void) void {
-        win.callbacks.on_file_drop_left = cb;
+    pub fn setOnFileDropLeft(win: *Window, ctx: ?*anyopaque, cb: ?*const fn (?*anyopaque) void) void {
+        win.callbacks.on_file_drop_left = .{ .func = cb, .ctx = ctx };
     }
 
-    /// Register a callback for text input events (Unicode/IME).
-    pub fn setOnTextInput(win: *Window, cb: ?*const fn (event.TextInput) void) void {
-        win.callbacks.on_text_input = cb;
+    pub fn setOnTextInput(win: *Window, ctx: ?*anyopaque, cb: ?*const fn (?*anyopaque, event.TextInput) void) void {
+        win.callbacks.on_text_input = .{ .func = cb, .ctx = ctx };
     }
 
-    /// Register a callback for appearance (dark/light mode) changes.
-    pub fn setOnAppearanceChanged(win: *Window, cb: ?*const fn (event.Appearance) void) void {
-        win.callbacks.on_appearance_changed = cb;
+    pub fn setOnAppearanceChanged(win: *Window, ctx: ?*anyopaque, cb: ?*const fn (?*anyopaque, event.Appearance) void) void {
+        win.callbacks.on_appearance_changed = .{ .func = cb, .ctx = ctx };
     }
 
     // ── InputState ────────────────────────────────────────────────────────────
@@ -598,77 +598,39 @@ pub const Window = struct {
         switch (ev) {
             .key_pressed => |kp| {
                 win.input_state.handleKeyPress(kp.key);
-                if (win.callbacks.on_key_press) |cb| cb(kp);
+                win.callbacks.on_key_press.call(kp);
             },
             .key_released => |kr| {
                 win.input_state.handleKeyRelease(kr.key);
-                if (win.callbacks.on_key_release) |cb| cb(kr);
+                win.callbacks.on_key_release.call(kr);
             },
             .mouse_pressed => |btn| {
                 win.input_state.handleMousePress(btn);
-                if (win.callbacks.on_mouse_press) |cb| cb(btn);
+                win.callbacks.on_mouse_press.call(btn);
             },
             .mouse_released => |btn| {
                 win.input_state.handleMouseRelease(btn);
-                if (win.callbacks.on_mouse_release) |cb| cb(btn);
+                win.callbacks.on_mouse_release.call(btn);
             },
-            .mouse_moved => |pos| {
-                if (win.callbacks.on_mouse_move) |cb| cb(pos);
-            },
-            .scroll => |s| {
-                if (win.callbacks.on_scroll) |cb| cb(s);
-            },
-            .resized => |r| {
-                if (win.callbacks.on_resize) |cb| cb(r);
-            },
-            .moved => |p| {
-                if (win.callbacks.on_move) |cb| cb(p);
-            },
-            .focus_gained => {
-                if (win.callbacks.on_focus_gained) |cb| cb();
-            },
-            .focus_lost => {
-                if (win.callbacks.on_focus_lost) |cb| cb();
-            },
-            .close_requested => {
-                if (win.callbacks.on_close_requested) |cb| cb();
-            },
-            .minimized => {
-                if (win.callbacks.on_minimized) |cb| cb();
-            },
-            .restored => {
-                if (win.callbacks.on_restored) |cb| cb();
-            },
-            .maximized => {
-                if (win.callbacks.on_maximized) |cb| cb();
-            },
-            .mouse_entered => {
-                if (win.callbacks.on_mouse_entered) |cb| cb();
-            },
-            .mouse_left => {
-                if (win.callbacks.on_mouse_left) |cb| cb();
-            },
-            .refresh_requested => {
-                if (win.callbacks.on_refresh_requested) |cb| cb();
-            },
-            .scale_changed => |s| {
-                if (win.callbacks.on_scale_changed) |cb| cb(s);
-            },
-            .file_drop_started => {
-                if (win.callbacks.on_file_drop_started) |cb| cb();
-            },
-            .file_dropped => |count| {
-                if (win.callbacks.on_file_dropped) |cb| cb(count);
-            },
-            .file_drop_left => {
-                if (win.callbacks.on_file_drop_left) |cb| cb();
-            },
-            .text_input => |ti| {
-                if (win.callbacks.on_text_input) |cb| cb(ti);
-            },
-            .appearance_changed => |a| {
-                if (win.callbacks.on_appearance_changed) |cb| cb(a);
-            },
+            .mouse_moved => |pos| win.callbacks.on_mouse_move.call(pos),
+            .scroll => |s| win.callbacks.on_scroll.call(s),
+            .resized => |r| win.callbacks.on_resize.call(r),
+            .moved => |p| win.callbacks.on_move.call(p),
+            .focus_gained => win.callbacks.on_focus_gained.call(),
+            .focus_lost => win.callbacks.on_focus_lost.call(),
+            .close_requested => win.callbacks.on_close_requested.call(),
+            .minimized => win.callbacks.on_minimized.call(),
+            .restored => win.callbacks.on_restored.call(),
+            .maximized => win.callbacks.on_maximized.call(),
+            .mouse_entered => win.callbacks.on_mouse_entered.call(),
+            .mouse_left => win.callbacks.on_mouse_left.call(),
+            .refresh_requested => win.callbacks.on_refresh_requested.call(),
+            .scale_changed => |s| win.callbacks.on_scale_changed.call(s),
+            .file_drop_started => win.callbacks.on_file_drop_started.call(),
+            .file_dropped => |count| win.callbacks.on_file_dropped.call(count),
+            .file_drop_left => win.callbacks.on_file_drop_left.call(),
+            .text_input => |ti| win.callbacks.on_text_input.call(ti),
+            .appearance_changed => |a| win.callbacks.on_appearance_changed.call(a),
         }
     }
 

@@ -17,4 +17,5 @@ comptime {
     _ = @import("tests/zgl_compat_test.zig");
     _ = @import("tests/appearance_test.zig");
     _ = @import("tests/keyboard_layout_test.zig");
+    _ = @import("tests/callback_context_test.zig");
 }
