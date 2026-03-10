@@ -81,37 +81,21 @@ Ordered by impact. Each feature follows TDD: write tests first, then implement.
 
 ---
 
-## 7. Display Content Bounds
+## ~~7. Display Content Bounds~~ DONE
 
-**Why seventh**: Apps need to know usable screen area (excluding dock and menu bar) for correct window placement.
-
-**Tests**:
-- `Monitor` struct gains `content_x`, `content_y`, `content_w`, `content_h` fields
-- Content bounds exclude menu bar and dock
-- Content bounds update when dock position/size changes
-- Primary monitor content bounds differ from full bounds (menu bar)
-
-**Implementation**:
-- Query `[NSScreen visibleFrame]` instead of (or in addition to) `[NSScreen frame]`
-- Convert from bottom-left to top-left coordinates
-- Add fields to `Monitor` struct
+- `Monitor` gains `content_x`, `content_y`, `content_w`, `content_h` from `[NSScreen visibleFrame]`
+- Excludes menu bar and dock from usable area
+- Y-coordinates flipped to top-left origin for both full and content bounds
+- 10 tests in `monitor_test.zig`
 
 ---
 
-## 8. Stable Display UUIDs
+## ~~8. Stable Display UUIDs~~ DONE
 
-**Why eighth**: Display identification survives reconnects. Important for remembering window positions per-monitor.
-
-**Tests**:
-- `Monitor` struct gains `uuid: u128` (or `[16]u8`) field
-- UUID is stable across app restarts for same physical display
-- UUID differs between displays
-- UUID survives disconnect/reconnect of same display
-
-**Implementation**:
-- Add `extern fn` for `CGDisplayCreateUUIDFromDisplayID`
-- Call `CFUUIDGetUUIDBytes` to extract 128-bit value
-- Store in `Monitor` struct
+- `Monitor` gains `uuid: u128` via `CGDisplayCreateUUIDFromDisplayID` + `CFUUIDGetUUIDBytes`
+- Display ID extracted from `[screen deviceDescription]["NSScreenNumber"]`
+- Zero if UUID unavailable
+- Tests in `monitor_test.zig` (combined with #7)
 
 ---
 
