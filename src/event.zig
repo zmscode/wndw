@@ -286,4 +286,27 @@ pub const Event = union(enum) {
     file_dropped: u32,
     /// A file drag left the window without dropping.
     file_drop_left,
+
+    /// Text input from keyboard (after IME/dead-key processing).
+    /// Contains a UTF-8 string slice valid until the next `poll()` cycle.
+    text_input: TextInput,
+
+    /// The system appearance changed (e.g. user toggled dark mode).
+    appearance_changed: Appearance,
+};
+
+/// Payload for `text_input` events. The text is a UTF-8 encoded slice
+/// pointing into a static buffer, valid until the next `poll()` cycle.
+pub const TextInput = struct {
+    /// UTF-8 encoded text (e.g. a single character, or an IME composition result).
+    text: []const u8,
+};
+
+// ── Appearance ──────────────────────────────────────────────────────────────
+
+/// System appearance (light or dark mode). On macOS this maps to
+/// `NSAppearanceNameAqua` and `NSAppearanceNameDarkAqua`.
+pub const Appearance = enum {
+    light,
+    dark,
 };

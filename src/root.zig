@@ -20,6 +20,7 @@
 ///       while (win.poll()) |ev| { ... }
 ///   }
 const builtin = @import("builtin");
+const event = @import("event.zig");
 
 /// Comptime platform dispatch. Each backend module must export:
 ///   - `Window` struct with poll/close/shouldClose + all window methods
@@ -40,13 +41,15 @@ const platform = switch (builtin.os.tag) {
 pub const Window = platform.Window;
 pub const Event = platform.Event;
 pub const Key = platform.Key;
-pub const MouseButton = @import("event.zig").MouseButton;
-pub const Cursor = @import("event.zig").Cursor;
-pub const Modifiers = @import("event.zig").Modifiers;
-pub const KeyEvent = @import("event.zig").KeyEvent;
-pub const Position = @import("event.zig").Position;
-pub const Size = @import("event.zig").Size;
-pub const ScrollDelta = @import("event.zig").ScrollDelta;
+pub const MouseButton = event.MouseButton;
+pub const Cursor = event.Cursor;
+pub const Modifiers = event.Modifiers;
+pub const KeyEvent = event.KeyEvent;
+pub const Position = event.Position;
+pub const Size = event.Size;
+pub const ScrollDelta = event.ScrollDelta;
+pub const TextInput = event.TextInput;
+pub const Appearance = event.Appearance;
 pub const Options = platform.Options;
 pub const GLHints = platform.GLHints;
 pub const Monitor = platform.Monitor;

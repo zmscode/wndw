@@ -36,6 +36,12 @@ extern fn CFRelease(cf: *anyopaque) void;
 /// CoreFoundation string encoding constant for ASCII.
 const kCFStringEncodingASCII: u32 = 0x0600;
 
+// ── Foundation global string constants ──────────────────────────────────────
+/// The actual `NSDefaultRunLoopMode` constant from Foundation. Using this
+/// instead of creating a string with `ns_string("kCFRunLoopDefaultMode")`
+/// ensures pointer-identity with the real run loop mode constant.
+extern var NSDefaultRunLoopMode: objc.id;
+
 // ── Options ───────────────────────────────────────────────────────────────────
 
 /// Window creation options passed to `wndw.init()`.
@@ -51,7 +57,7 @@ pub const Options = struct {
     /// `minimize()` and `maximize()` methods.
     borderless: bool = false,
     /// Allow the user to resize the window by dragging its edges.
-    resizeable: bool = false,
+    resizable: bool = false,
     /// Use an inset (transparent) titlebar where content extends behind
     /// the title bar area. The traffic-light buttons remain visible but
     /// the bar itself is transparent, similar to Safari or Finder.
@@ -64,6 +70,8 @@ pub const Options = struct {
 /// call to `init()` and never torn down (matches NSApplication's own
 /// lifetime). Contains cached ObjC class objects so we don't re-register
 /// them on every window creation.
+const MAX_LIVE_WINDOWS = 16;
+
 const Global = struct {
     /// The `[NSApplication sharedApplication]` singleton.
     app: objc.id = undefined,
@@ -81,6 +89,10 @@ const Global = struct {
     /// ObjC string creation on every event drain.
     run_loop_mode: objc.id = undefined,
     initialised: bool = false,
+    /// All live windows — used to broadcast app-wide events (e.g. appearance changes).
+    live_windows: [MAX_LIVE_WINDOWS]?*Window = .{null} ** MAX_LIVE_WINDOWS,
+    /// Last known appearance — used to detect changes and avoid duplicate events.
+    last_appearance: event.Appearance = .light,
 };
 var g: Global = .{};
 
@@ -202,6 +214,9 @@ pub const Window = struct {
     /// Cursor visibility state (tracked locally since NSCursor hide/unhide
     /// is a global counter, not per-window).
     is_cursor_visible: bool = true,
+    /// Saved style mask for borderless minimize: restored in the
+    /// `windowDidMiniaturize:` delegate after the animation finishes.
+    saved_style_mask: ?usize = null,
     /// Drag-and-drop state: number of dropped files and their paths.
     /// Paths point into ObjC-managed memory and are valid until the next
     /// drag operation.
@@ -213,6 +228,10 @@ pub const Window = struct {
     input_state: InputState = .{},
     /// Optional event callbacks — fire during `dispatchEvent()`.
     callbacks: Callbacks = .{},
+    /// Static buffer for text_input event payloads. Overwritten each time
+    /// `insertText:` fires; valid until the next `poll()` cycle.
+    text_buf: [64]u8 = undefined,
+    text_len: usize = 0,
     /// NSOpenGLContext and NSOpenGLPixelFormat (null until `createGLContext` is called).
     gl_context: ?objc.id = null,
     gl_format: ?objc.id = null,
@@ -244,6 +263,18 @@ pub const Window = struct {
         on_focus_gained: ?*const fn () void = null,
         on_focus_lost: ?*const fn () void = null,
         on_close_requested: ?*const fn () void = null,
+        on_minimized: ?*const fn () void = null,
+        on_restored: ?*const fn () void = null,
+        on_maximized: ?*const fn () void = null,
+        on_mouse_entered: ?*const fn () void = null,
+        on_mouse_left: ?*const fn () void = null,
+        on_refresh_requested: ?*const fn () void = null,
+        on_scale_changed: ?*const fn (f32) void = null,
+        on_file_drop_started: ?*const fn () void = null,
+        on_file_dropped: ?*const fn (u32) void = null,
+        on_file_drop_left: ?*const fn () void = null,
+        on_text_input: ?*const fn (event.TextInput) void = null,
+        on_appearance_changed: ?*const fn (event.Appearance) void = null,
     };
 
     /// Register a callback for key press events.
@@ -301,6 +332,66 @@ pub const Window = struct {
         win.callbacks.on_close_requested = cb;
     }
 
+    /// Register a callback for when the window is minimised to the dock.
+    pub fn setOnMinimized(win: *Window, cb: ?*const fn () void) void {
+        win.callbacks.on_minimized = cb;
+    }
+
+    /// Register a callback for when the window is restored from the dock.
+    pub fn setOnRestored(win: *Window, cb: ?*const fn () void) void {
+        win.callbacks.on_restored = cb;
+    }
+
+    /// Register a callback for when the window is maximised (zoomed).
+    pub fn setOnMaximized(win: *Window, cb: ?*const fn () void) void {
+        win.callbacks.on_maximized = cb;
+    }
+
+    /// Register a callback for when the mouse enters the window.
+    pub fn setOnMouseEntered(win: *Window, cb: ?*const fn () void) void {
+        win.callbacks.on_mouse_entered = cb;
+    }
+
+    /// Register a callback for when the mouse leaves the window.
+    pub fn setOnMouseLeft(win: *Window, cb: ?*const fn () void) void {
+        win.callbacks.on_mouse_left = cb;
+    }
+
+    /// Register a callback for redraw requests.
+    pub fn setOnRefreshRequested(win: *Window, cb: ?*const fn () void) void {
+        win.callbacks.on_refresh_requested = cb;
+    }
+
+    /// Register a callback for backing scale changes (e.g. moved to Retina display).
+    pub fn setOnScaleChanged(win: *Window, cb: ?*const fn (f32) void) void {
+        win.callbacks.on_scale_changed = cb;
+    }
+
+    /// Register a callback for when a file drag enters the window.
+    pub fn setOnFileDropStarted(win: *Window, cb: ?*const fn () void) void {
+        win.callbacks.on_file_drop_started = cb;
+    }
+
+    /// Register a callback for when files are dropped on the window.
+    pub fn setOnFileDropped(win: *Window, cb: ?*const fn (u32) void) void {
+        win.callbacks.on_file_dropped = cb;
+    }
+
+    /// Register a callback for when a file drag leaves the window.
+    pub fn setOnFileDropLeft(win: *Window, cb: ?*const fn () void) void {
+        win.callbacks.on_file_drop_left = cb;
+    }
+
+    /// Register a callback for text input events (Unicode/IME).
+    pub fn setOnTextInput(win: *Window, cb: ?*const fn (event.TextInput) void) void {
+        win.callbacks.on_text_input = cb;
+    }
+
+    /// Register a callback for appearance (dark/light mode) changes.
+    pub fn setOnAppearanceChanged(win: *Window, cb: ?*const fn (event.Appearance) void) void {
+        win.callbacks.on_appearance_changed = cb;
+    }
+
     // ── InputState ────────────────────────────────────────────────────────────
 
     /// Bitset-based key and mouse button state tracking.
@@ -319,6 +410,14 @@ pub const Window = struct {
         const KEY_WORDS = 3;
         /// 5 mouse buttons fit in a u8.
         const MOUSE_BITS = 5;
+
+        comptime {
+            const key_count = @typeInfo(event.Key).@"enum".fields.len;
+            if (KEY_WORDS * 64 < key_count)
+                @compileError("KEY_WORDS * 64 must be >= number of Key variants");
+            if (MOUSE_BITS < @typeInfo(event.MouseButton).@"enum".fields.len)
+                @compileError("MOUSE_BITS must be >= number of MouseButton variants");
+        }
 
         key_current: [KEY_WORDS]u64 = .{ 0, 0, 0 },
         key_prev: [KEY_WORDS]u64 = .{ 0, 0, 0 },
@@ -406,6 +505,7 @@ pub const Window = struct {
     /// Destroy the window and free its memory. Nils the delegate first to
     /// prevent stale callbacks from firing after the Window struct is freed.
     pub fn close(win: *Window) void {
+        unregister_live_window(win);
         win.deleteContext();
         win.releaseDropStrings();
         objc.msgSend(void, win.ns_window, "setDelegate:", .{@as(?objc.id, null)});
@@ -496,7 +596,42 @@ pub const Window = struct {
             .close_requested => {
                 if (win.callbacks.on_close_requested) |cb| cb();
             },
-            else => {},
+            .minimized => {
+                if (win.callbacks.on_minimized) |cb| cb();
+            },
+            .restored => {
+                if (win.callbacks.on_restored) |cb| cb();
+            },
+            .maximized => {
+                if (win.callbacks.on_maximized) |cb| cb();
+            },
+            .mouse_entered => {
+                if (win.callbacks.on_mouse_entered) |cb| cb();
+            },
+            .mouse_left => {
+                if (win.callbacks.on_mouse_left) |cb| cb();
+            },
+            .refresh_requested => {
+                if (win.callbacks.on_refresh_requested) |cb| cb();
+            },
+            .scale_changed => |s| {
+                if (win.callbacks.on_scale_changed) |cb| cb(s);
+            },
+            .file_drop_started => {
+                if (win.callbacks.on_file_drop_started) |cb| cb();
+            },
+            .file_dropped => |count| {
+                if (win.callbacks.on_file_dropped) |cb| cb(count);
+            },
+            .file_drop_left => {
+                if (win.callbacks.on_file_drop_left) |cb| cb();
+            },
+            .text_input => |ti| {
+                if (win.callbacks.on_text_input) |cb| cb(ti);
+            },
+            .appearance_changed => |a| {
+                if (win.callbacks.on_appearance_changed) |cb| cb(a);
+            },
         }
     }
 
@@ -591,10 +726,14 @@ pub const Window = struct {
     /// restoring the original style mask.
     pub fn minimize(win: *Window) void {
         if (win.is_borderless) {
+            // Borderless windows lack NSWindowStyleMaskMiniaturizable, so
+            // miniaturize: is a no-op. Temporarily add it, then let the
+            // windowDidMiniaturize: delegate restore the mask after the
+            // animation completes (restoring immediately would race it).
             const style = objc.msgSend(usize, win.ns_window, "styleMask", .{});
+            win.saved_style_mask = style;
             objc.msgSend(void, win.ns_window, "setStyleMask:", .{style | cocoa.NSWindowStyleMaskMiniaturizable});
             objc.msgSend(void, win.ns_window, "miniaturize:", .{@as(?objc.id, null)});
-            objc.msgSend(void, win.ns_window, "setStyleMask:", .{style});
         } else {
             objc.msgSend(void, win.ns_window, "miniaturize:", .{@as(?objc.id, null)});
         }
@@ -652,6 +791,12 @@ pub const Window = struct {
     /// Returns `true` if the cursor is currently visible.
     pub fn isCursorVisible(win: *const Window) bool {
         return win.is_cursor_visible;
+    }
+
+    /// Query the current system appearance (light or dark mode).
+    /// On macOS this inspects `[NSApp effectiveAppearance].name`.
+    pub fn getAppearance(_: *const Window) event.Appearance {
+        return query_system_appearance();
     }
 
     /// Set the window to float above all other windows (always-on-top) or
@@ -935,7 +1080,10 @@ pub const Window = struct {
     }
 
     /// Returns a slice of all connected monitors (up to `MAX_MONITORS`).
-    /// The slice points to a static buffer and is valid until the next call.
+    ///
+    /// **Important:** The returned slice points into a static buffer that is
+    /// overwritten on every call. Copy the data if you need it to persist
+    /// beyond the next call to `getMonitors`.
     pub fn getMonitors(_: *Window) []const Monitor {
         const screens = objc.msgSend(objc.id, objc.ns_class("NSScreen"), "screens", .{});
         const count = objc.msgSend(objc.NSUInteger, screens, "count", .{});
@@ -1191,7 +1339,7 @@ pub fn init(title: [:0]const u8, w: i32, h: i32, opts: Options) !*Window {
     var mask: usize = cocoa.NSWindowStyleMaskTitled |
         cocoa.NSWindowStyleMaskClosable |
         cocoa.NSWindowStyleMaskMiniaturizable;
-    if (opts.resizeable) mask |= cocoa.NSWindowStyleMaskResizable;
+    if (opts.resizable) mask |= cocoa.NSWindowStyleMaskResizable;
     if (opts.inset_titlebar) mask |= cocoa.NSWindowStyleMaskFullSizeContentView;
     if (opts.borderless) mask = cocoa.NSWindowStyleMaskBorderless;
 
@@ -1293,6 +1441,8 @@ pub fn init(title: [:0]const u8, w: i32, h: i32, opts: Options) !*Window {
     const actual_frame = fn_actual(ns_win, objc.sel_registerName("frame"));
     win.x = @intFromFloat(actual_frame.origin.x);
     win.y = @intFromFloat(actual_frame.origin.y);
+
+    register_live_window(win);
 
     return win;
 }
@@ -1427,6 +1577,52 @@ fn mouse_pos(ns_ev: objc.id, win_h: i32) struct { x: i32, y: i32 } {
 
 /// One-time NSApplication bootstrap. Creates the shared application,
 /// registers our custom ObjC classes, and calls `finishLaunching`.
+// ── Live window tracking ─────────────────────────────────────────────────────
+
+fn register_live_window(win: *Window) void {
+    for (&g.live_windows) |*slot| {
+        if (slot.* == null) {
+            slot.* = win;
+            return;
+        }
+    }
+}
+
+fn unregister_live_window(win: *Window) void {
+    for (&g.live_windows) |*slot| {
+        if (slot.* == win) {
+            slot.* = null;
+            return;
+        }
+    }
+}
+
+// ── Appearance tracking ─────────────────────────────────────────────────────
+
+/// Query the current system appearance by inspecting `[NSApp effectiveAppearance].name`.
+fn query_system_appearance() event.Appearance {
+    const appearance = objc.msgSend(objc.id, g.app, "effectiveAppearance", .{});
+    const name = objc.msgSend(objc.id, appearance, "name", .{});
+    // Compare against the known dark appearance name string.
+    const dark_name = objc.ns_string("NSAppearanceNameDarkAqua");
+    const is_equal = objc.msgSend(objc.BOOL, name, "isEqualToString:", .{dark_name});
+    return if (is_equal != objc.NO) .dark else .light;
+}
+
+/// NSNotificationCenter callback for `NSAppearanceDidChangeNotification` (macOS 10.14+)
+/// and `AppleInterfaceThemeChangedNotification` from NSDistributedNotificationCenter.
+fn appearance_did_change(_: objc.id, _: objc.SEL, _: objc.id) callconv(.c) void {
+    const current = query_system_appearance();
+    if (current == g.last_appearance) return;
+    g.last_appearance = current;
+    // Broadcast to all live windows.
+    for (g.live_windows) |maybe_win| {
+        if (maybe_win) |win| {
+            win.queue.push(.{ .appearance_changed = current });
+        }
+    }
+}
+
 fn setup_app() !void {
     g.app = objc.msgSend(objc.id, objc.ns_class("NSApplication"), "sharedApplication", .{});
     _ = objc.ns_retain(g.app);
@@ -1438,13 +1634,31 @@ fn setup_app() !void {
 
     g.app_delegate_cls = objc.objc_allocateClassPair(objc.objc_getClass("NSObject"), "WndwAppDelegate", 0) orelse
         return error.ClassAllocFailed;
+    _ = objc.class_addMethod(g.app_delegate_cls, objc.sel_registerName("appearanceDidChange:"), @ptrCast(&appearance_did_change), "v@:@");
     objc.objc_registerClassPair(g.app_delegate_cls);
     g.app_delegate = objc.msgSend(objc.id, objc.msgSend(objc.id, g.app_delegate_cls, "alloc", .{}), "init", .{});
     objc.msgSend(void, g.app, "setDelegate:", .{g.app_delegate});
 
     objc.msgSend(void, g.app, "finishLaunching", .{});
 
-    g.run_loop_mode = objc.ns_retain(objc.ns_string("kCFRunLoopDefaultMode"));
+    g.run_loop_mode = objc.ns_retain(NSDefaultRunLoopMode);
+
+    // Record initial appearance and observe changes via NSDistributedNotificationCenter.
+    // "AppleInterfaceThemeChangedNotification" is the standard way to detect dark/light
+    // mode toggles — it fires on all macOS versions that support dark mode (10.14+).
+    g.last_appearance = query_system_appearance();
+    const dist_center = objc.msgSend(objc.id, objc.ns_class("NSDistributedNotificationCenter"), "defaultCenter", .{});
+    const FnAddObserver = fn (objc.id, objc.SEL, objc.id, objc.SEL, ?objc.id, objc.id, objc.NSUInteger) callconv(.c) void;
+    const fn_add: *const FnAddObserver = @ptrCast(&objc.objc_msgSend);
+    fn_add(
+        dist_center,
+        objc.sel_registerName("addObserver:selector:name:object:suspensionBehavior:"),
+        g.app_delegate,
+        objc.sel_registerName("appearanceDidChange:"),
+        null,
+        objc.ns_string("AppleInterfaceThemeChangedNotification"),
+        2, // NSNotificationSuspensionBehaviorDeliverImmediately
+    );
 
     try setup_window_delegate_class();
     try setup_view_class();
@@ -1490,6 +1704,13 @@ fn setup_view_class() !void {
     _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("draggingEntered:"), @ptrCast(&view_dragging_entered), "Q@:@");
     _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("draggingExited:"), @ptrCast(&view_dragging_exited), "v@:@");
     _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("performDragOperation:"), @ptrCast(&view_perform_drag_operation), "B@:@");
+    // Text input: keyDown: calls interpretKeyEvents: which triggers insertText:replacementRange:
+    _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("keyDown:"), @ptrCast(&view_key_down), "v@:@");
+    _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("insertText:replacementRange:"), @ptrCast(&view_insert_text), "v@:@{_NSRange=QQ}");
+    // Required for NSTextInputClient protocol conformance.
+    _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("hasMarkedText"), @ptrCast(&view_has_marked_text), "B@:");
+    _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("setMarkedText:selectedRange:replacementRange:"), @ptrCast(&view_set_marked_text), "v@:@{_NSRange=QQ}{_NSRange=QQ}");
+    _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("unmarkText"), @ptrCast(&view_unmark_text), "v@:");
 
     objc.objc_registerClassPair(g.view_cls);
 }
@@ -1562,6 +1783,12 @@ fn delegate_window_did_resign_key(self: objc.id, _: objc.SEL, _: objc.id) callco
 /// `windowDidMiniaturize:` — window minimised to dock.
 fn delegate_window_did_miniaturize(self: objc.id, _: objc.SEL, _: objc.id) callconv(.c) void {
     if (get_win_from_delegate(self)) |win| {
+        // Restore the original style mask if minimize() temporarily added
+        // NSWindowStyleMaskMiniaturizable for a borderless window.
+        if (win.saved_style_mask) |mask| {
+            objc.msgSend(void, win.ns_window, "setStyleMask:", .{mask});
+            win.saved_style_mask = null;
+        }
         win.is_minimized = true;
         win.queue.push(.minimized);
     }
@@ -1669,6 +1896,48 @@ fn view_perform_drag_operation(self: objc.id, _: objc.SEL, sender: objc.id) call
     win.queue.push(.{ .file_dropped = win.drop_count });
     return objc.YES;
 }
+
+// ── Text input view methods ──────────────────────────────────────────────────
+
+/// NSRange (location, length) used by NSTextInputClient methods.
+const NSRange = extern struct { location: objc.NSUInteger, length: objc.NSUInteger };
+
+/// `keyDown:` — route key events through interpretKeyEvents: for IME processing.
+/// This triggers insertText:replacementRange: for committed text.
+fn view_key_down(self: objc.id, _: objc.SEL, ns_ev: objc.id) callconv(.c) void {
+    // Wrap the event in a single-element NSArray for interpretKeyEvents:.
+    const arr = objc.msgSend(objc.id, objc.ns_class("NSArray"), "arrayWithObject:", .{ns_ev});
+    objc.msgSend(void, self, "interpretKeyEvents:", .{arr});
+}
+
+/// `insertText:replacementRange:` — called by the input system when text
+/// is committed (after IME/dead-key processing).
+fn view_insert_text(self: objc.id, _: objc.SEL, text_obj: objc.id, _: NSRange) callconv(.c) void {
+    const win = get_win_from_view(self) orelse return;
+    // text_obj may be NSString or NSAttributedString. Get the plain string.
+    const str: objc.id = if (objc.msgSend(objc.BOOL, text_obj, "isKindOfClass:", .{objc.ns_class("NSAttributedString")}) != objc.NO)
+        objc.msgSend(objc.id, text_obj, "string", .{})
+    else
+        text_obj;
+    const utf8 = objc.msgSend([*:0]const u8, str, "UTF8String", .{});
+    const len = objc.msgSend(objc.NSUInteger, str, "lengthOfBytesUsingEncoding:", .{@as(objc.NSUInteger, 4)}); // NSUTF8StringEncoding = 4
+    if (len == 0) return;
+    const copy_len = @min(len, win.text_buf.len);
+    @memcpy(win.text_buf[0..copy_len], utf8[0..copy_len]);
+    win.text_len = copy_len;
+    win.queue.push(.{ .text_input = .{ .text = win.text_buf[0..copy_len] } });
+}
+
+/// `hasMarkedText` — required by NSTextInputClient. We don't support marked text (pre-edit).
+fn view_has_marked_text(_: objc.id, _: objc.SEL) callconv(.c) objc.BOOL {
+    return objc.NO;
+}
+
+/// `setMarkedText:selectedRange:replacementRange:` — stub for NSTextInputClient.
+fn view_set_marked_text(_: objc.id, _: objc.SEL, _: objc.id, _: NSRange, _: NSRange) callconv(.c) void {}
+
+/// `unmarkText` — stub for NSTextInputClient.
+fn view_unmark_text(_: objc.id, _: objc.SEL) callconv(.c) void {}
 
 // ── macOS hardware keycode → Key ──────────────────────────────────────────────
 

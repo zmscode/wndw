@@ -110,7 +110,7 @@ test "Event: file_drop_left tag exists" {
     try std.testing.expect(Event.file_drop_left == .file_drop_left);
 }
 
-test "Event: all 21 tags constructible" {
+test "Event: all 22 tags constructible" {
     const no_mods = Modifiers{};
     const events = [_]Event{
         .{ .key_pressed = .{ .key = .a, .mods = no_mods } },
@@ -134,8 +134,9 @@ test "Event: all 21 tags constructible" {
         .file_drop_started,
         .{ .file_dropped = 1 },
         .file_drop_left,
+        .{ .appearance_changed = .dark },
     };
-    try std.testing.expectEqual(@as(usize, 21), events.len);
+    try std.testing.expectEqual(@as(usize, 22), events.len);
 }
 
 // ── Modifiers ───────────────────────────────────────────────────────────────
