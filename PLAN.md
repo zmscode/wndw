@@ -69,25 +69,15 @@ Ordered by impact. Each feature follows TDD: write tests first, then implement.
 
 ---
 
-## 6. Blurred / Vibrancy Backgrounds
+## ~~6. Blurred / Vibrancy Backgrounds~~ DONE
 
-**Why sixth**: Major visual feature for modern macOS apps (sidebars, toolbars, HUDs). Builds on existing `transparent` option.
-
-**Tests**:
-- `WindowBackground` enum: `.opaque`, `.transparent`, `.blurred`, `.ultra_dark`
-- `.blurred` inserts `NSVisualEffectView` behind content view
-- `.blurred` material can be set (sidebar, popover, HUD, etc.)
-- Transparent + blurred composites correctly
-- Blurred background works on macOS 12+ via `NSVisualEffectView`
-- Fallback to `CGSSetWindowBackgroundBlurRadius` on older versions
-
-**Implementation**:
-- Replace `transparent: bool` in `Options` with `background: WindowBackground`
-- Add `NSVisualEffectView` extern declarations
-- Create and insert effect view as lowest subview of content view
-- Set material, blending mode, state to `.active`
-- Add `win.setBackground()` for runtime changes
-- Backward compat: keep `transparent` as alias for `.transparent`
+- `Options.WindowBackground` enum: `.solid`, `.transparent`, `.blurred`, `.ultra_dark`
+- `Options.BlurMaterial` enum: `.sidebar`, `.popover`, `.hud`, `.titlebar`, `.under_window`
+- `NSVisualEffectView` inserted lazily behind `WndwView` on first blurred request
+- `win.setBackground()` / `win.setBlurMaterial()` for runtime changes
+- `transparent: bool` kept as deprecated alias for `.transparent` background
+- NSVisualEffectMaterial/BlendingMode/State constants added to `cocoa.zig`
+- 18 tests in `vibrancy_test.zig`
 
 ---
 
