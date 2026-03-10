@@ -127,10 +127,16 @@ pub fn main() !void {
                             const current = win.getAppearance();
                             const target: wndw.Appearance = if (current == .dark) .light else .dark;
                             win.setAppearance(target);
+                            if (floating_win) |fw| fw.setAppearance(target);
+                            if (popup_win) |pw| pw.setAppearance(target);
+                            if (dialog_win) |dw| dw.setAppearance(target);
                             std.debug.print("appearance → {}\n", .{target});
                         },
                         .l => {
                             win.setAppearance(null);
+                            if (floating_win) |fw| fw.setAppearance(null);
+                            if (popup_win) |pw| pw.setAppearance(null);
+                            if (dialog_win) |dw| dw.setAppearance(null);
                             std.debug.print("appearance → follow system\n", .{});
                         },
 
@@ -230,6 +236,38 @@ pub fn main() !void {
                 .refresh_requested => {},
                 .text_input => |ti| std.debug.print("text: {s}\n", .{ti.text}),
                 .appearance_changed => |a| std.debug.print("appearance: {}\n", .{a}),
+            }
+        }
+
+        // Poll child windows for close requests
+        if (floating_win) |fw| {
+            while (fw.poll()) |cev| {
+                if (cev == .close_requested) {
+                    fw.close();
+                    floating_win = null;
+                    std.debug.print("floating window closed\n", .{});
+                    break;
+                }
+            }
+        }
+        if (popup_win) |pw| {
+            while (pw.poll()) |cev| {
+                if (cev == .close_requested) {
+                    pw.close();
+                    popup_win = null;
+                    std.debug.print("popup window closed\n", .{});
+                    break;
+                }
+            }
+        }
+        if (dialog_win) |dw| {
+            while (dw.poll()) |cev| {
+                if (cev == .close_requested) {
+                    dw.close();
+                    dialog_win = null;
+                    std.debug.print("dialog closed\n", .{});
+                    break;
+                }
             }
         }
     }
