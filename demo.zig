@@ -59,6 +59,9 @@ pub fn main() !void {
     // Enable drag-and-drop
     win.setDragAndDrop(true);
 
+    // Background cycle state (0=solid, 1=transparent, 2=blurred, 3=ultra_dark)
+    var bg_index: u8 = 0;
+
     // Track child windows so we can close them on exit
     var floating_win: ?*wndw.Window = null;
     var popup_win: ?*wndw.Window = null;
@@ -79,6 +82,7 @@ pub fn main() !void {
     std.debug.print("  r → read clipboard      w → write clipboard\n", .{});
     std.debug.print("  i → crosshair cursor    a → reset cursor\n", .{});
     std.debug.print("  d → toggle dark/light   l → follow system appearance\n", .{});
+    std.debug.print("  b → cycle background    (solid/transparent/blurred/ultra_dark)\n", .{});
     std.debug.print("  1 → floating window     2 → popup window\n", .{});
     std.debug.print("  3 → dialog (sheet)      0 → close child windows\n", .{});
 
@@ -138,6 +142,20 @@ pub fn main() !void {
                             if (popup_win) |pw| pw.setAppearance(null);
                             if (dialog_win) |dw| dw.setAppearance(null);
                             std.debug.print("appearance → follow system\n", .{});
+                        },
+
+                        // Background
+                        .b => {
+                            const BG = wndw.Options.WindowBackground;
+                            bg_index = (bg_index + 1) % 4;
+                            const target: BG = switch (bg_index) {
+                                0 => .solid,
+                                1 => .transparent,
+                                2 => .blurred,
+                                else => .ultra_dark,
+                            };
+                            win.setBackground(target);
+                            std.debug.print("background → {}\n", .{target});
                         },
 
                         // Window kinds

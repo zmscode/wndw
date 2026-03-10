@@ -79,6 +79,27 @@ pub const NSFloatingWindowLevel: isize = 3;
 /// Allow the window to enter fullscreen via the green title bar button.
 pub const NSWindowCollectionBehaviorFullScreenPrimary: usize = 1 << 7; // 0x80
 
+// ── NSVisualEffectMaterial ────────────────────────────────────────────────────
+/// Material constants for `[NSVisualEffectView setMaterial:]`.
+pub const NSVisualEffectMaterialTitlebar: isize = 3;
+pub const NSVisualEffectMaterialPopover: isize = 6;
+pub const NSVisualEffectMaterialSidebar: isize = 7;
+pub const NSVisualEffectMaterialUnderWindowBackground: isize = 21;
+pub const NSVisualEffectMaterialHUDWindow: isize = 23;
+
+// ── NSVisualEffectBlendingMode ────────────────────────────────────────────────
+/// `NSVisualEffectBlendingModeBehindWindow` — blend with content behind the window.
+pub const NSVisualEffectBlendingModeBehindWindow: isize = 0;
+
+// ── NSVisualEffectState ───────────────────────────────────────────────────────
+/// `NSVisualEffectStateActive` — always active regardless of window focus.
+pub const NSVisualEffectStateActive: isize = 1;
+
+// ── NSViewAutoresizingMask ────────────────────────────────────────────────────
+/// Width + height both flexible — fills parent on resize.
+pub const NSViewWidthSizable: usize = 2;
+pub const NSViewHeightSizable: usize = 16;
+
 // ── NSOpenGLContextParameter ──────────────────────────────────────────────────
 /// Parameters for `[NSOpenGLContext setValues:forParameter:]`.
 /// Controls vsync (0 = off, 1 = on).

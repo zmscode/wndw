@@ -105,6 +105,28 @@ extern var NSDefaultRunLoopMode: objc.id;
 /// Window creation options passed to `wndw.init()`.
 /// All fields default to `false` for a standard titled window.
 pub const Options = struct {
+    /// Window background style — controls transparency and vibrancy.
+    pub const WindowBackground = enum {
+        /// Solid opaque background (default).
+        solid,
+        /// Transparent — clear the background to clear color yourself.
+        transparent,
+        /// Frosted-glass vibrancy via NSVisualEffectView. The specific look
+        /// is controlled by `blur_material`.
+        blurred,
+        /// Dark HUD-style vibrancy (NSVisualEffectMaterialHUDWindow).
+        ultra_dark,
+    };
+
+    /// NSVisualEffectView material, used when `background == .blurred`.
+    pub const BlurMaterial = enum {
+        sidebar,      // NSVisualEffectMaterialSidebar = 7
+        popover,      // NSVisualEffectMaterialPopover = 6
+        hud,          // NSVisualEffectMaterialHUDWindow = 23
+        titlebar,     // NSVisualEffectMaterialTitlebar = 3
+        under_window, // NSVisualEffectMaterialUnderWindowBackground = 21
+    };
+
     /// Window kind — controls the underlying Cocoa class and focus behavior.
     pub const WindowKind = enum {
         /// Standard NSWindow — appears in window list, can become key and main.
@@ -123,8 +145,7 @@ pub const Options = struct {
 
     /// Centre the window on the primary display.
     centred: bool = false,
-    /// Allow the window background to be transparent (requires clearing
-    /// to a transparent color yourself).
+    /// Deprecated: use `background = .transparent` instead.
     transparent: bool = false,
     /// Remove the title bar and window chrome entirely. Note: borderless
     /// windows need special handling for minimize/maximize — see the
@@ -136,6 +157,10 @@ pub const Options = struct {
     /// the title bar area. The traffic-light buttons remain visible but
     /// the bar itself is transparent, similar to Safari or Finder.
     inset_titlebar: bool = false,
+    /// Window background: solid, transparent, blurred, or ultra_dark.
+    background: WindowBackground = .solid,
+    /// NSVisualEffectView material used when `background == .blurred`.
+    blur_material: BlurMaterial = .sidebar,
     /// Window kind — normal (default), floating palette, popup, or dialog.
     kind: WindowKind = .normal,
     /// Parent window for `.dialog` kind (sheet attachment). Ignored for
@@ -297,6 +322,8 @@ pub const Window = struct {
     is_cursor_visible: bool = true,
     /// Per-window appearance override (null = follow system).
     appearance_override: ?event.Appearance = null,
+    /// NSVisualEffectView used for blurred/vibrancy backgrounds (null if unused).
+    ns_effect_view: ?objc.id = null,
     /// Saved style mask for borderless minimize: restored in the
     /// `windowDidMiniaturize:` delegate after the animation finishes.
     saved_style_mask: ?usize = null,
@@ -863,6 +890,20 @@ pub const Window = struct {
         objc.msgSend(void, win.ns_window, "setAppearance:", .{ns_appearance});
     }
 
+    /// Set the window background style at runtime. `.blurred` and `.ultra_dark`
+    /// use `NSVisualEffectView` (created lazily on first use). `.solid` and
+    /// `.transparent` hide the effect view if present.
+    pub fn setBackground(win: *Window, bg: Options.WindowBackground) void {
+        apply_background(win, bg, .sidebar);
+    }
+
+    /// Change the NSVisualEffectView material while keeping the current
+    /// background mode. Only has visible effect when `background == .blurred`.
+    pub fn setBlurMaterial(win: *Window, material: Options.BlurMaterial) void {
+        const ev = win.ns_effect_view orelse return;
+        objc.msgSend(void, ev, "setMaterial:", .{blur_material_value(material)});
+    }
+
     /// Set the window to float above all other windows (always-on-top) or
     /// restore normal window level.
     pub fn setAlwaysOnTop(win: *Window, enable: bool) void {
@@ -1419,6 +1460,80 @@ pub const Window = struct {
     }
 };
 
+// ── Background helpers ────────────────────────────────────────────────────────
+
+fn blur_material_value(material: Options.BlurMaterial) objc.NSInteger {
+    return switch (material) {
+        .sidebar => cocoa.NSVisualEffectMaterialSidebar,
+        .popover => cocoa.NSVisualEffectMaterialPopover,
+        .hud => cocoa.NSVisualEffectMaterialHUDWindow,
+        .titlebar => cocoa.NSVisualEffectMaterialTitlebar,
+        .under_window => cocoa.NSVisualEffectMaterialUnderWindowBackground,
+    };
+}
+
+/// Create an NSVisualEffectView sized to fill the window content area and
+/// configure it with the specified material. The caller is responsible for
+/// inserting it into the view hierarchy. Returns an object with retain +1.
+fn create_effect_view(content_rect: objc.NSRect, material: objc.NSInteger) objc.id {
+    const FnInitFrame = fn (objc.id, objc.SEL, objc.NSRect) callconv(.c) objc.id;
+    const fn_init: *const FnInitFrame = @ptrCast(&objc.objc_msgSend);
+    const ev = fn_init(
+        objc.msgSend(objc.id, objc.ns_class("NSVisualEffectView"), "alloc", .{}),
+        objc.sel_registerName("initWithFrame:"),
+        content_rect,
+    );
+    objc.msgSend(void, ev, "setMaterial:", .{material});
+    objc.msgSend(void, ev, "setBlendingMode:", .{cocoa.NSVisualEffectBlendingModeBehindWindow});
+    objc.msgSend(void, ev, "setState:", .{cocoa.NSVisualEffectStateActive});
+    objc.msgSend(void, ev, "setAutoresizingMask:", .{cocoa.NSViewWidthSizable | cocoa.NSViewHeightSizable});
+    return ev;
+}
+
+/// Apply a background mode to an already-created window. Creates the
+/// NSVisualEffectView lazily on first blurred/ultra_dark request.
+fn apply_background(win: *Window, bg: Options.WindowBackground, material: Options.BlurMaterial) void {
+    switch (bg) {
+        .solid => {
+            if (win.ns_effect_view) |ev| objc.msgSend(void, ev, "setHidden:", .{objc.YES});
+            objc.msgSend(void, win.ns_window, "setOpaque:", .{objc.YES});
+            const col = objc.msgSend(objc.id, objc.ns_class("NSColor"), "windowBackgroundColor", .{});
+            objc.msgSend(void, win.ns_window, "setBackgroundColor:", .{col});
+        },
+        .transparent => {
+            if (win.ns_effect_view) |ev| objc.msgSend(void, ev, "setHidden:", .{objc.YES});
+            objc.msgSend(void, win.ns_window, "setOpaque:", .{objc.NO});
+            const col = objc.msgSend(objc.id, objc.ns_class("NSColor"), "clearColor", .{});
+            objc.msgSend(void, win.ns_window, "setBackgroundColor:", .{col});
+        },
+        .blurred, .ultra_dark => {
+            // Lazily create the effect view if not yet present.
+            if (win.ns_effect_view == null) {
+                const FnRect = fn (objc.id, objc.SEL) callconv(.c) objc.NSRect;
+                const fn_bounds: *const FnRect = @ptrCast(&objc.objc_msgSend);
+                const bounds = fn_bounds(win.ns_view, objc.sel_registerName("bounds"));
+                const ev = create_effect_view(bounds, 0);
+                win.ns_effect_view = ev;
+                // Insert behind WndwView in the content view's subview list.
+                // NSWindowBelow = -1 places it as the backmost subview.
+                const FnAddSubview = fn (objc.id, objc.SEL, objc.id, objc.NSInteger, ?objc.id) callconv(.c) void;
+                const fn_add: *const FnAddSubview = @ptrCast(&objc.objc_msgSend);
+                fn_add(win.ns_view, objc.sel_registerName("addSubview:positioned:relativeTo:"), ev, -1, null);
+            }
+            const ev = win.ns_effect_view.?;
+            const mat: objc.NSInteger = if (bg == .ultra_dark)
+                cocoa.NSVisualEffectMaterialHUDWindow
+            else
+                blur_material_value(material);
+            objc.msgSend(void, ev, "setMaterial:", .{mat});
+            objc.msgSend(void, ev, "setHidden:", .{objc.NO});
+            objc.msgSend(void, win.ns_window, "setOpaque:", .{objc.NO});
+            const col = objc.msgSend(objc.id, objc.ns_class("NSColor"), "clearColor", .{});
+            objc.msgSend(void, win.ns_window, "setBackgroundColor:", .{col});
+        },
+    }
+}
+
 // ── init ──────────────────────────────────────────────────────────────────────
 
 /// Create and show a new window. Bootstraps NSApplication on first call.
@@ -1553,10 +1668,9 @@ pub fn init(title: [:0]const u8, w: i32, h: i32, opts: Options) !*Window {
     objc.msgSend(void, ns_view, "addTrackingArea:", .{tracking_area});
     objc.msgSend(void, tracking_area, "release", .{}); // balance alloc/init; view retains its own ref
 
-    if (opts.transparent) {
-        objc.msgSend(void, ns_win, "setOpaque:", .{objc.NO});
-        objc.msgSend(void, ns_win, "setBackgroundColor:", .{objc.msgSend(objc.id, objc.ns_class("NSColor"), "clearColor", .{})});
-    }
+    // Apply background mode. `transparent: true` is the legacy alias for `.transparent`.
+    const bg: Options.WindowBackground = if (opts.transparent) .transparent else opts.background;
+    apply_background(win, bg, opts.blur_material);
 
     if (opts.inset_titlebar) {
         objc.msgSend(void, ns_win, "setTitlebarAppearsTransparent:", .{objc.YES});
