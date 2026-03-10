@@ -44,7 +44,9 @@ pub fn main() !void {
 
     // Monitor info
     const mon = win.getPrimaryMonitor();
-    std.debug.print("primary monitor: {}x{} @ ({},{}) scale={d:.1}\n", .{ mon.w, mon.h, mon.x, mon.y, mon.scale });
+    std.debug.print("primary monitor: {}x{} @ ({},{})\n", .{ mon.w, mon.h, mon.x, mon.y });
+    std.debug.print("  content area:  {}x{} @ ({},{}) scale={d:.1}\n", .{ mon.content_w, mon.content_h, mon.content_x, mon.content_y, mon.scale });
+    std.debug.print("  uuid:          {x:0>32}\n", .{mon.uuid});
 
     // Current appearance
     const appearance = win.getAppearance();
@@ -58,6 +60,8 @@ pub fn main() !void {
 
     // Enable drag-and-drop
     win.setDragAndDrop(true);
+
+    win.setBackground(wndw.Options.WindowBackground.ultra_dark);
 
     // Background cycle state (0=solid, 1=transparent, 2=blurred, 3=ultra_dark)
     var bg_index: u8 = 0;

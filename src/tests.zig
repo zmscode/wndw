@@ -21,4 +21,5 @@ comptime {
     _ = @import("tests/window_kind_test.zig");
     _ = @import("tests/display_link_test.zig");
     _ = @import("tests/vibrancy_test.zig");
+    _ = @import("tests/monitor_test.zig");
 }

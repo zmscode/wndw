@@ -36,6 +36,18 @@ extern fn CFRelease(cf: *anyopaque) void;
 /// CoreFoundation string encoding constant for ASCII.
 const kCFStringEncodingASCII: u32 = 0x0600;
 
+// ── CoreGraphics / IOKit externs (for display UUIDs) ─────────────────────────
+
+/// Opaque type for a CFUUID reference.
+const CFUUIDRef = *anyopaque;
+/// 128-bit UUID bytes as a packed struct matching CFUUIDBytes layout.
+const CFUUIDBytes = extern struct { byte0: u8, byte1: u8, byte2: u8, byte3: u8, byte4: u8, byte5: u8, byte6: u8, byte7: u8, byte8: u8, byte9: u8, byte10: u8, byte11: u8, byte12: u8, byte13: u8, byte14: u8, byte15: u8 };
+
+/// Get a CFUUID for the given CGDirectDisplayID.
+extern fn CGDisplayCreateUUIDFromDisplayID(displayID: u32) ?CFUUIDRef;
+/// Extract the 16 bytes from a CFUUID reference.
+extern fn CFUUIDGetUUIDBytes(uuid: CFUUIDRef) CFUUIDBytes;
+
 // ── Carbon / UCKeyTranslate externs (for keyboard layout character resolution) ──
 
 /// Opaque type for keyboard layout data (UCKeyboardLayout*).
@@ -208,12 +220,21 @@ const EventQueue = @import("../../event_queue.zig").EventQueue;
 
 /// Display/monitor info. Populated from `NSScreen` properties.
 pub const Monitor = struct {
+    /// Full display bounds (top-left origin, physical pixels / points).
     x: i32,
     y: i32,
     w: i32,
     h: i32,
+    /// Usable content bounds — excludes the menu bar and dock.
+    content_x: i32,
+    content_y: i32,
+    content_w: i32,
+    content_h: i32,
     /// Backing scale factor (1.0 = standard, 2.0 = Retina).
     scale: f32,
+    /// Stable 128-bit display UUID (survives reconnects and reboots).
+    /// Zero if the UUID could not be determined.
+    uuid: u128,
     /// The underlying NSScreen object (for passing to `moveToMonitor`).
     ns_screen: objc.id,
 };
@@ -226,16 +247,63 @@ const MAX_MONITORS = 16;
 fn monitor_from_screen(screen: objc.id) Monitor {
     const FnRect = fn (objc.id, objc.SEL) callconv(.c) objc.NSRect;
     const fn_rect: *const FnRect = @ptrCast(&objc.objc_msgSend);
+
+    // Full display frame (bottom-left Cocoa origin → flip to top-left).
     const frame = fn_rect(screen, objc.sel_registerName("frame"));
+
+    // Usable content frame (excludes menu bar and dock).
+    const visible = fn_rect(screen, objc.sel_registerName("visibleFrame"));
+
     const FnScale = fn (objc.id, objc.SEL) callconv(.c) objc.CGFloat;
     const fn_scale: *const FnScale = @ptrCast(&objc.objc_msgSend);
     const scale: f32 = @floatCast(fn_scale(screen, objc.sel_registerName("backingScaleFactor")));
+
+    // Flip Y from Cocoa bottom-left to top-left origin.
+    // In Cocoa, Y increases upward. Screen 0 has origin (0,0) at bottom-left.
+    // We convert so Y=0 is the top of the primary display's full frame.
+    const primary = objc.msgSend(objc.id, objc.ns_class("NSScreen"), "mainScreen", .{});
+    const FnPrimRect = fn (objc.id, objc.SEL) callconv(.c) objc.NSRect;
+    const fn_prim: *const FnPrimRect = @ptrCast(&objc.objc_msgSend);
+    const prim_frame = fn_prim(primary, objc.sel_registerName("frame"));
+    const screen_h = prim_frame.size.height;
+
+    const flip_y = screen_h - frame.origin.y - frame.size.height;
+    const flip_vy = screen_h - visible.origin.y - visible.size.height;
+
+    // Stable display UUID via CGDirectDisplayID.
+    // The display ID lives in [screen deviceDescription]["NSScreenNumber"].
+    const device_desc = objc.msgSend(objc.id, screen, "deviceDescription", .{});
+    const key = objc.ns_string("NSScreenNumber");
+    const ns_num = objc.msgSend(objc.id, device_desc, "objectForKey:", .{key});
+    const FnIntVal = fn (objc.id, objc.SEL) callconv(.c) objc.NSInteger;
+    const fn_int: *const FnIntVal = @ptrCast(&objc.objc_msgSend);
+    const display_id: u32 = @intCast(fn_int(ns_num, objc.sel_registerName("integerValue")));
+
+    var uuid: u128 = 0;
+    if (CGDisplayCreateUUIDFromDisplayID(display_id)) |cf_uuid| {
+        const bytes = CFUUIDGetUUIDBytes(cf_uuid);
+        CFRelease(cf_uuid);
+        uuid = @as(u128, bytes.byte0) << 120 | @as(u128, bytes.byte1) << 112 |
+               @as(u128, bytes.byte2) << 104 | @as(u128, bytes.byte3) << 96  |
+               @as(u128, bytes.byte4) << 88  | @as(u128, bytes.byte5) << 80  |
+               @as(u128, bytes.byte6) << 72  | @as(u128, bytes.byte7) << 64  |
+               @as(u128, bytes.byte8) << 56  | @as(u128, bytes.byte9) << 48  |
+               @as(u128, bytes.byte10) << 40 | @as(u128, bytes.byte11) << 32 |
+               @as(u128, bytes.byte12) << 24 | @as(u128, bytes.byte13) << 16 |
+               @as(u128, bytes.byte14) << 8  | @as(u128, bytes.byte15);
+    }
+
     return .{
         .x = @intFromFloat(frame.origin.x),
-        .y = @intFromFloat(frame.origin.y),
+        .y = @intFromFloat(flip_y),
         .w = @intFromFloat(frame.size.width),
         .h = @intFromFloat(frame.size.height),
+        .content_x = @intFromFloat(visible.origin.x),
+        .content_y = @intFromFloat(flip_vy),
+        .content_w = @intFromFloat(visible.size.width),
+        .content_h = @intFromFloat(visible.size.height),
         .scale = scale,
+        .uuid = uuid,
         .ns_screen = screen,
     };
 }
