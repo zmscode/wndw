@@ -99,52 +99,28 @@ Ordered by impact. Each feature follows TDD: write tests first, then implement.
 
 ---
 
-## 9. Ctrl+Click → Right-Click Synthesis
+## ~~9. Ctrl+Click → Right-Click Synthesis~~ DONE
 
-**Why ninth**: Standard macOS convention. Users with single-button trackpads/mice expect this.
-
-**Tests**:
-- Ctrl+left-click produces `.mouse_pressed: .right` event
-- Ctrl+left-release produces `.mouse_released: .right` event
-- Plain left-click with ctrl released is unaffected
-- `isMouseDown(.right)` returns true during ctrl+left-click
-
-**Implementation**:
-- In `translate_event()`, check `NSEventModifierFlagControl` on left-click events
-- Rewrite button from `.left` to `.right` when ctrl is held
-- Strip ctrl from modifiers on the synthesized event
+- `ctrl_synthesize(button, ctrl_held)` pure public function maps ctrl+left → right
+- `translate_event()` applies ctrl_synthesize on LeftMouseDown/Up events
+- 5 tests in `ctrl_click_test.zig`
 
 ---
 
-## 10. First-Mouse Detection
+## ~~10. First-Mouse Detection~~ DONE
 
-**Why tenth**: Apps need to know if a click was the one that focused the window (to avoid accidental actions).
-
-**Tests**:
-- First click on unfocused window has `first_mouse: true`
-- Subsequent clicks have `first_mouse: false`
-- Flag resets after window loses and regains focus
-
-**Implementation**:
-- Override `acceptsFirstMouse:` on `WndwView` to return `YES`
-- Track `is_first_mouse` flag, set on `mouseDown:` when `!is_focused`
-- Add `first_mouse: bool` field to mouse event payload (or expose via `win.isFirstMouse()`)
+- `Window.is_first_mouse: bool` field; `Window.isFirstMouse()` query method
+- `acceptsFirstMouse:` view override returns YES and sets flag when window was unfocused
+- 6 tests in `first_mouse_test.zig`
 
 ---
 
-## 11. Drag Position During Drag-and-Drop
+## ~~11. Drag Position During Drag-and-Drop~~ DONE
 
-**Why eleventh**: Apps need cursor position during drag to show drop targets / insertion indicators.
-
-**Tests**:
-- `.file_drag_moved: Position` event fires during drag hover
-- Position is in window content coordinates (top-left origin)
-- Position updates on every `draggingUpdated:` call
-
-**Implementation**:
-- Add `.file_drag_moved: Position` event variant
-- In `WndwView.draggingUpdated:`, extract `[draggingInfo draggingLocation]`
-- Convert from view coordinates and push event
+- `Event.file_drag_moved: Position` variant added to event.zig
+- `draggingUpdated:` view handler extracts `[draggingInfo draggingLocation]`
+- Converts Cocoa bottom-left coords to top-left origin and pushes event
+- 5 tests in `drag_position_test.zig`
 
 ---
 
