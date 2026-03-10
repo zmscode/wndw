@@ -290,6 +290,9 @@ pub const Event = union(enum) {
     file_dropped: u32,
     /// A file drag left the window without dropping.
     file_drop_left,
+    /// The cursor moved within the window while a file drag is in progress.
+    /// Coordinates are in window content space (top-left origin).
+    file_drag_moved: Position,
 
     /// Text input from keyboard (after IME/dead-key processing).
     /// Contains a UTF-8 string slice valid until the next `poll()` cycle.

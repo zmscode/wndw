@@ -36,8 +36,14 @@ test "Monitor: content fields are i32" {
 test "Monitor: content bounds fit within full bounds" {
     // A Monitor with content area fully within the full frame is valid.
     const m = Monitor{
-        .x = 0, .y = 0, .w = 1920, .h = 1080,
-        .content_x = 0, .content_y = 0, .content_w = 1920, .content_h = 1057,
+        .x = 0,
+        .y = 0,
+        .w = 1920,
+        .h = 1080,
+        .content_x = 0,
+        .content_y = 0,
+        .content_w = 1920,
+        .content_h = 1057,
         .scale = 1.0,
         .ns_screen = undefined,
         .uuid = 0,
@@ -58,8 +64,14 @@ test "Monitor: uuid field is u128" {
 
 test "Monitor: uuid zero is a valid default (unknown display)" {
     const m = Monitor{
-        .x = 0, .y = 0, .w = 1920, .h = 1080,
-        .content_x = 0, .content_y = 0, .content_w = 1920, .content_h = 1057,
+        .x = 0,
+        .y = 0,
+        .w = 1920,
+        .h = 1080,
+        .content_x = 0,
+        .content_y = 0,
+        .content_w = 1920,
+        .content_h = 1057,
         .scale = 1.0,
         .ns_screen = undefined,
         .uuid = 0,
@@ -69,15 +81,29 @@ test "Monitor: uuid zero is a valid default (unknown display)" {
 
 test "Monitor: two monitors with different UUIDs are distinct displays" {
     const a = Monitor{
-        .x = 0, .y = 0, .w = 1920, .h = 1080,
-        .content_x = 0, .content_y = 0, .content_w = 1920, .content_h = 1057,
-        .scale = 1.0, .ns_screen = undefined,
+        .x = 0,
+        .y = 0,
+        .w = 1920,
+        .h = 1080,
+        .content_x = 0,
+        .content_y = 0,
+        .content_w = 1920,
+        .content_h = 1057,
+        .scale = 1.0,
+        .ns_screen = undefined,
         .uuid = 0xDEAD_BEEF_0000_0001_0000_0000_0000_0001,
     };
     const b = Monitor{
-        .x = 1920, .y = 0, .w = 2560, .h = 1440,
-        .content_x = 1920, .content_y = 0, .content_w = 2560, .content_h = 1440,
-        .scale = 2.0, .ns_screen = undefined,
+        .x = 1920,
+        .y = 0,
+        .w = 2560,
+        .h = 1440,
+        .content_x = 1920,
+        .content_y = 0,
+        .content_w = 2560,
+        .content_h = 1440,
+        .scale = 2.0,
+        .ns_screen = undefined,
         .uuid = 0xDEAD_BEEF_0000_0002_0000_0000_0000_0002,
     };
     try std.testing.expect(a.uuid != b.uuid);

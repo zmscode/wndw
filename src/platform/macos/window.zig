@@ -132,10 +132,10 @@ pub const Options = struct {
 
     /// NSVisualEffectView material, used when `background == .blurred`.
     pub const BlurMaterial = enum {
-        sidebar,      // NSVisualEffectMaterialSidebar = 7
-        popover,      // NSVisualEffectMaterialPopover = 6
-        hud,          // NSVisualEffectMaterialHUDWindow = 23
-        titlebar,     // NSVisualEffectMaterialTitlebar = 3
+        sidebar, // NSVisualEffectMaterialSidebar = 7
+        popover, // NSVisualEffectMaterialPopover = 6
+        hud, // NSVisualEffectMaterialHUDWindow = 23
+        titlebar, // NSVisualEffectMaterialTitlebar = 3
         under_window, // NSVisualEffectMaterialUnderWindowBackground = 21
     };
 
@@ -284,13 +284,13 @@ fn monitor_from_screen(screen: objc.id) Monitor {
         const bytes = CFUUIDGetUUIDBytes(cf_uuid);
         CFRelease(cf_uuid);
         uuid = @as(u128, bytes.byte0) << 120 | @as(u128, bytes.byte1) << 112 |
-               @as(u128, bytes.byte2) << 104 | @as(u128, bytes.byte3) << 96  |
-               @as(u128, bytes.byte4) << 88  | @as(u128, bytes.byte5) << 80  |
-               @as(u128, bytes.byte6) << 72  | @as(u128, bytes.byte7) << 64  |
-               @as(u128, bytes.byte8) << 56  | @as(u128, bytes.byte9) << 48  |
-               @as(u128, bytes.byte10) << 40 | @as(u128, bytes.byte11) << 32 |
-               @as(u128, bytes.byte12) << 24 | @as(u128, bytes.byte13) << 16 |
-               @as(u128, bytes.byte14) << 8  | @as(u128, bytes.byte15);
+            @as(u128, bytes.byte2) << 104 | @as(u128, bytes.byte3) << 96 |
+            @as(u128, bytes.byte4) << 88 | @as(u128, bytes.byte5) << 80 |
+            @as(u128, bytes.byte6) << 72 | @as(u128, bytes.byte7) << 64 |
+            @as(u128, bytes.byte8) << 56 | @as(u128, bytes.byte9) << 48 |
+            @as(u128, bytes.byte10) << 40 | @as(u128, bytes.byte11) << 32 |
+            @as(u128, bytes.byte12) << 24 | @as(u128, bytes.byte13) << 16 |
+            @as(u128, bytes.byte14) << 8 | @as(u128, bytes.byte15);
     }
 
     return .{
@@ -390,6 +390,9 @@ pub const Window = struct {
     is_cursor_visible: bool = true,
     /// Per-window appearance override (null = follow system).
     appearance_override: ?event.Appearance = null,
+    /// True if the most recent mouse click was the click that activated this window
+    /// (a "first-mouse" click). Set by `acceptsFirstMouse:`, cleared on the next click.
+    is_first_mouse: bool = false,
     /// NSVisualEffectView used for blurred/vibrancy backgrounds (null if unused).
     ns_effect_view: ?objc.id = null,
     /// Saved style mask for borderless minimize: restored in the
@@ -775,6 +778,7 @@ pub const Window = struct {
             .file_drop_started => win.callbacks.on_file_drop_started.call(),
             .file_dropped => |count| win.callbacks.on_file_dropped.call(count),
             .file_drop_left => win.callbacks.on_file_drop_left.call(),
+            .file_drag_moved => {}, // position is in the event payload; no dedicated callback yet
             .text_input => |ti| win.callbacks.on_text_input.call(ti),
             .appearance_changed => |a| win.callbacks.on_appearance_changed.call(a),
         }
@@ -824,6 +828,12 @@ pub const Window = struct {
     /// Returns `true` if the window is currently minimised to the dock.
     pub fn isMinimized(win: *const Window) bool {
         return win.is_minimized;
+    }
+
+    /// Returns `true` if the most recent mouse click was the click that gave this
+    /// window focus (i.e. the window was unfocused when the click landed).
+    pub fn isFirstMouse(win: *const Window) bool {
+        return win.is_first_mouse;
     }
 
     /// Returns the current content area dimensions in pixels.
@@ -1528,6 +1538,16 @@ pub const Window = struct {
     }
 };
 
+// ── Feature #9: Ctrl+Click → Right-Click synthesis ───────────────────────────
+
+/// Map ctrl+left-click to right-click, following macOS convention.
+/// Returns `.right` if `ctrl_held` is true and `button` is `.left`;
+/// all other combinations are returned unchanged.
+pub fn ctrl_synthesize(button: event.MouseButton, ctrl_held: bool) event.MouseButton {
+    if (ctrl_held and button == .left) return .right;
+    return button;
+}
+
 // ── Background helpers ────────────────────────────────────────────────────────
 
 fn blur_material_value(material: Options.BlurMaterial) objc.NSInteger {
@@ -1856,8 +1876,16 @@ fn translate_event(win: *Window, ns_ev: objc.id, ev_type: usize) void {
             }
         },
 
-        cocoa.NSEventTypeLeftMouseDown => win.queue.push(.{ .mouse_pressed = .left }),
-        cocoa.NSEventTypeLeftMouseUp => win.queue.push(.{ .mouse_released = .left }),
+        cocoa.NSEventTypeLeftMouseDown => {
+            const flags = objc.msgSend(usize, ns_ev, "modifierFlags", .{});
+            const ctrl = (flags & cocoa.NSEventModifierFlagControl) != 0;
+            win.queue.push(.{ .mouse_pressed = ctrl_synthesize(.left, ctrl) });
+        },
+        cocoa.NSEventTypeLeftMouseUp => {
+            const flags = objc.msgSend(usize, ns_ev, "modifierFlags", .{});
+            const ctrl = (flags & cocoa.NSEventModifierFlagControl) != 0;
+            win.queue.push(.{ .mouse_released = ctrl_synthesize(.left, ctrl) });
+        },
         cocoa.NSEventTypeRightMouseDown => win.queue.push(.{ .mouse_pressed = .right }),
         cocoa.NSEventTypeRightMouseUp => win.queue.push(.{ .mouse_released = .right }),
         cocoa.NSEventTypeOtherMouseDown => {
@@ -2036,11 +2064,13 @@ fn setup_view_class() !void {
 
     _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("initWithWndwWindow:"), @ptrCast(&view_init_with_window), "@@:^v");
     _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("acceptsFirstResponder"), @ptrCast(&view_accepts_first_responder), "B@:");
+    _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("acceptsFirstMouse:"), @ptrCast(&view_accepts_first_mouse), "B@:@");
     _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("mouseEntered:"), @ptrCast(&view_mouse_entered), "v@:@");
     _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("mouseExited:"), @ptrCast(&view_mouse_exited), "v@:@");
     _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("drawRect:"), @ptrCast(&view_draw_rect), "v@:{CGRect={CGPoint=dd}{CGSize=dd}}");
     _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("viewDidChangeBackingProperties"), @ptrCast(&view_did_change_backing_properties), "v@:");
     _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("draggingEntered:"), @ptrCast(&view_dragging_entered), "Q@:@");
+    _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("draggingUpdated:"), @ptrCast(&view_dragging_updated), "Q@:@");
     _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("draggingExited:"), @ptrCast(&view_dragging_exited), "v@:@");
     _ = objc.class_addMethod(g.view_cls, objc.sel_registerName("performDragOperation:"), @ptrCast(&view_perform_drag_operation), "B@:@");
     // Text input: keyDown: calls interpretKeyEvents: which triggers insertText:replacementRange:
@@ -2171,6 +2201,15 @@ fn view_accepts_first_responder(_: objc.id, _: objc.SEL) callconv(.c) objc.BOOL 
     return objc.YES;
 }
 
+/// `acceptsFirstMouse:` → YES — process the click that activates the window.
+/// Records `is_first_mouse` on the Window when it was not focused at click time.
+fn view_accepts_first_mouse(self: objc.id, _: objc.SEL, _: objc.id) callconv(.c) objc.BOOL {
+    if (get_win_from_view(self)) |win| {
+        win.is_first_mouse = !win.is_focused;
+    }
+    return objc.YES;
+}
+
 /// `mouseEntered:` — cursor entered the view's tracking area.
 fn view_mouse_entered(self: objc.id, _: objc.SEL, _: objc.id) callconv(.c) void {
     if (get_win_from_view(self)) |win| win.queue.push(.mouse_entered);
@@ -2198,6 +2237,22 @@ fn view_did_change_backing_properties(self: objc.id, _: objc.SEL) callconv(.c) v
 /// `draggingEntered:` — file drag entered the view.
 fn view_dragging_entered(self: objc.id, _: objc.SEL, _: objc.id) callconv(.c) objc.NSUInteger {
     if (get_win_from_view(self)) |win| win.queue.push(.file_drop_started);
+    return 1; // NSDragOperationCopy
+}
+
+/// `draggingUpdated:` — cursor moved while a file drag is in progress.
+/// Pushes a `file_drag_moved` event with the current position in window
+/// content coordinates (top-left origin).
+fn view_dragging_updated(self: objc.id, _: objc.SEL, sender: objc.id) callconv(.c) objc.NSUInteger {
+    if (get_win_from_view(self)) |win| {
+        const FnPt = fn (objc.id, objc.SEL) callconv(.c) objc.NSPoint;
+        const fn_pt: *const FnPt = @ptrCast(&objc.objc_msgSend);
+        const loc = fn_pt(sender, objc.sel_registerName("draggingLocation"));
+        win.queue.push(.{ .file_drag_moved = .{
+            .x = @intFromFloat(loc.x),
+            .y = win.h - @as(i32, @intFromFloat(loc.y)),
+        } });
+    }
     return 1; // NSDragOperationCopy
 }
 

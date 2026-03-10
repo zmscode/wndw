@@ -22,4 +22,7 @@ comptime {
     _ = @import("tests/display_link_test.zig");
     _ = @import("tests/vibrancy_test.zig");
     _ = @import("tests/monitor_test.zig");
+    _ = @import("tests/ctrl_click_test.zig");
+    _ = @import("tests/first_mouse_test.zig");
+    _ = @import("tests/drag_position_test.zig");
 }
