@@ -30,6 +30,8 @@ var g_count: i32 = 0;
 var g_measurer: ui.TextMeasurer = undefined;
 var g_cx: *ui.WindowContext = undefined;
 var g_win: *wndw.Window = undefined;
+var g_mouse_x: f32 = 0;
+var g_mouse_y: f32 = 0;
 
 fn increment(_: ?*anyopaque) void {
     g_count += 1;
@@ -200,11 +202,10 @@ pub fn main() !void {
                     );
                 },
                 .mouse_moved => |pos| {
-                    const cursor = cx.handleMouseMove(
-                        @floatFromInt(pos.x),
-                        @floatFromInt(pos.y),
-                    );
-                    if (cursor) |c| {
+                    g_mouse_x = @floatFromInt(pos.x);
+                    g_mouse_y = @floatFromInt(pos.y);
+                    const cur = cx.handleMouseMove(g_mouse_x, g_mouse_y);
+                    if (cur) |c| {
                         win.setStandardCursor(c);
                     } else {
                         win.resetCursor();
@@ -212,20 +213,12 @@ pub fn main() !void {
                 },
                 .mouse_pressed => |btn| {
                     if (btn == .left) {
-                        const pos = win.getMousePos();
-                        cx.handleMousePress(
-                            @floatFromInt(pos.x),
-                            @floatFromInt(pos.y),
-                        );
+                        cx.handleMousePress(g_mouse_x, g_mouse_y);
                     }
                 },
                 .mouse_released => |btn| {
                     if (btn == .left) {
-                        const pos = win.getMousePos();
-                        cx.handleMouseRelease(
-                            @floatFromInt(pos.x),
-                            @floatFromInt(pos.y),
-                        );
+                        cx.handleMouseRelease(g_mouse_x, g_mouse_y);
                     }
                 },
                 else => {},

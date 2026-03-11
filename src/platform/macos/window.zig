@@ -1232,44 +1232,16 @@ pub const Window = struct {
     /// Get the current mouse position in screen coordinates (top-left origin).
     /// Uses `[NSEvent mouseLocation]` and flips Y from Cocoa's bottom-left
     /// origin to a top-left origin.
-    pub fn getMousePos(_: *Window) event.Position {
-        const loc = objc.msgSend(objc.NSPoint, objc.ns_class("NSEvent"), "mouseLocation", .{});
-
-        // Find the screen containing the cursor for correct Y flip.
-        const FnRect = fn (objc.id, objc.SEL) callconv(.c) objc.NSRect;
-        const fn_rect: *const FnRect = @ptrCast(&objc.objc_msgSend);
-        const FnIdx = fn (objc.id, objc.SEL, objc.NSUInteger) callconv(.c) objc.id;
-        const fn_idx: *const FnIdx = @ptrCast(&objc.objc_msgSend);
-
-        const screens = objc.msgSend(objc.id, objc.ns_class("NSScreen"), "screens", .{});
-        const count = objc.msgSend(objc.NSUInteger, screens, "count", .{});
-        var screen_frame: objc.NSRect = undefined;
-        var found = false;
-
-        var i: objc.NSUInteger = 0;
-        while (i < count) : (i += 1) {
-            const scr = fn_idx(screens, objc.sel_registerName("objectAtIndex:"), i);
-            const sf = fn_rect(scr, objc.sel_registerName("frame"));
-            if (loc.x >= sf.origin.x and loc.x < sf.origin.x + sf.size.width and
-                loc.y >= sf.origin.y and loc.y < sf.origin.y + sf.size.height)
-            {
-                screen_frame = sf;
-                found = true;
-                break;
-            }
-        }
-
-        if (!found) {
-            // Fallback to main screen if cursor is between screens.
-            screen_frame = fn_rect(
-                objc.msgSend(objc.id, objc.ns_class("NSScreen"), "mainScreen", .{}),
-                objc.sel_registerName("frame"),
-            );
-        }
-
+    pub fn getMousePos(win: *Window) event.Position {
+        // mouseLocationOutsideOfEventStream returns the cursor position
+        // in the window's coordinate system (bottom-left origin), just
+        // like NSEvent's locationInWindow. Flip Y to top-left origin.
+        const FnPt = fn (objc.id, objc.SEL) callconv(.c) objc.NSPoint;
+        const fn_pt: *const FnPt = @ptrCast(&objc.objc_msgSend);
+        const loc = fn_pt(win.ns_window, objc.sel_registerName("mouseLocationOutsideOfEventStream"));
         return .{
-            .x = @intFromFloat(loc.x - screen_frame.origin.x),
-            .y = @intFromFloat((screen_frame.origin.y + screen_frame.size.height) - loc.y),
+            .x = @intFromFloat(loc.x),
+            .y = win.content_h - @as(i32, @intFromFloat(loc.y)),
         };
     }
 
