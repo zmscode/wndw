@@ -1565,3 +1565,252 @@ test "View subscribe sets dirty flag on update" {
     handle.update(&pool, .{ .count = 1 });
     try testing.expect(dirty);
 }
+
+// ── Phase 6: Theme tests ────────────────────────────────────────────
+
+test "Theme dark preset has expected colors" {
+    const theme = ui.Theme.dark;
+    // Dark theme should have dark background, light text
+    try testing.expect(theme.bg.r < 80);
+    try testing.expect(theme.text.r > 150);
+}
+
+test "Theme light preset has expected colors" {
+    const theme = ui.Theme.light;
+    // Light theme should have light background, dark text
+    try testing.expect(theme.bg.r > 200);
+    try testing.expect(theme.text.r < 80);
+}
+
+test "Theme has all semantic color slots" {
+    const theme = ui.Theme.dark;
+    // Verify all semantic slots exist and are non-zero alpha
+    try testing.expect(theme.bg.a == 255);
+    try testing.expect(theme.text.a == 255);
+    try testing.expect(theme.surface.a == 255);
+    try testing.expect(theme.border.a == 255);
+    try testing.expect(theme.primary.a == 255);
+    try testing.expect(theme.danger.a == 255);
+    try testing.expect(theme.success.a == 255);
+    try testing.expect(theme.warning.a == 255);
+    try testing.expect(theme.muted.a == 255);
+}
+
+test "Theme custom overrides work" {
+    var theme = ui.Theme.dark;
+    const custom_bg = ui.Color.hex(0xFF00FF);
+    theme.bg = custom_bg;
+    try testing.expect(theme.bg.eql(custom_bg));
+    // Other fields unchanged
+    try testing.expect(theme.text.eql(ui.Theme.dark.text));
+}
+
+// ── Phase 6: Scroll state tests ─────────────────────────────────────
+
+test "ScrollState starts at origin" {
+    const state = ui.ScrollState{};
+    try testing.expectEqual(@as(f32, 0), state.offset_x);
+    try testing.expectEqual(@as(f32, 0), state.offset_y);
+}
+
+test "ScrollState.scrollBy adds delta" {
+    var state = ui.ScrollState{};
+    state.scrollBy(10, 20);
+    try testing.expectApproxEqAbs(@as(f32, 10), state.offset_x, 0.01);
+    try testing.expectApproxEqAbs(@as(f32, 20), state.offset_y, 0.01);
+}
+
+test "ScrollState.scrollBy accumulates" {
+    var state = ui.ScrollState{};
+    state.scrollBy(10, 5);
+    state.scrollBy(-3, 7);
+    try testing.expectApproxEqAbs(@as(f32, 7), state.offset_x, 0.01);
+    try testing.expectApproxEqAbs(@as(f32, 12), state.offset_y, 0.01);
+}
+
+test "ScrollState.clamp constrains to content bounds" {
+    var state = ui.ScrollState{};
+    state.scrollBy(0, 500);
+    state.clamp(200, 100); // content_h=200, viewport_h=100 → max_y=100
+    try testing.expectApproxEqAbs(@as(f32, 100), state.offset_y, 0.01);
+}
+
+test "ScrollState.clamp prevents negative scroll" {
+    var state = ui.ScrollState{};
+    state.scrollBy(0, -50);
+    state.clamp(200, 100);
+    try testing.expectApproxEqAbs(@as(f32, 0), state.offset_y, 0.01);
+}
+
+test "ScrollState.clamp when content fits viewport" {
+    var state = ui.ScrollState{};
+    state.scrollBy(0, 100);
+    state.clamp(50, 100); // content smaller than viewport → max_y=0
+    try testing.expectApproxEqAbs(@as(f32, 0), state.offset_y, 0.01);
+}
+
+test "ScrollState.scrollToTop resets to zero" {
+    var state = ui.ScrollState{};
+    state.scrollBy(0, 200);
+    state.scrollToTop();
+    try testing.expectApproxEqAbs(@as(f32, 0), state.offset_y, 0.01);
+}
+
+// ── Phase 6: Animation tests ────────────────────────────────────────
+
+test "Easing linear is identity" {
+    try testing.expectApproxEqAbs(@as(f32, 0.0), ui.Easing.linear(0.0), 0.001);
+    try testing.expectApproxEqAbs(@as(f32, 0.5), ui.Easing.linear(0.5), 0.001);
+    try testing.expectApproxEqAbs(@as(f32, 1.0), ui.Easing.linear(1.0), 0.001);
+}
+
+test "Easing ease_in starts slow" {
+    const mid = ui.Easing.ease_in(0.5);
+    // ease_in(0.5) should be less than 0.5 (starts slow)
+    try testing.expect(mid < 0.5);
+    try testing.expectApproxEqAbs(@as(f32, 0.0), ui.Easing.ease_in(0.0), 0.001);
+    try testing.expectApproxEqAbs(@as(f32, 1.0), ui.Easing.ease_in(1.0), 0.001);
+}
+
+test "Easing ease_out ends slow" {
+    const mid = ui.Easing.ease_out(0.5);
+    // ease_out(0.5) should be greater than 0.5 (ends slow)
+    try testing.expect(mid > 0.5);
+    try testing.expectApproxEqAbs(@as(f32, 0.0), ui.Easing.ease_out(0.0), 0.001);
+    try testing.expectApproxEqAbs(@as(f32, 1.0), ui.Easing.ease_out(1.0), 0.001);
+}
+
+test "Easing ease_in_out is symmetric" {
+    try testing.expectApproxEqAbs(@as(f32, 0.5), ui.Easing.ease_in_out(0.5), 0.001);
+    try testing.expectApproxEqAbs(@as(f32, 0.0), ui.Easing.ease_in_out(0.0), 0.001);
+    try testing.expectApproxEqAbs(@as(f32, 1.0), ui.Easing.ease_in_out(1.0), 0.001);
+    // Symmetric: f(0.25) + f(0.75) ≈ 1.0
+    const a = ui.Easing.ease_in_out(0.25);
+    const b = ui.Easing.ease_in_out(0.75);
+    try testing.expectApproxEqAbs(@as(f32, 1.0), a + b, 0.01);
+}
+
+test "Animation starts not finished" {
+    const anim = ui.Animation.init(0, 100, 0.3, ui.Easing.linear);
+    try testing.expect(!anim.isFinished());
+}
+
+test "Animation value at t=0 returns from" {
+    const anim = ui.Animation.init(10, 50, 0.5, ui.Easing.linear);
+    try testing.expectApproxEqAbs(@as(f32, 10), anim.value(), 0.01);
+}
+
+test "Animation advance updates progress" {
+    var anim = ui.Animation.init(0, 100, 1.0, ui.Easing.linear);
+    anim.advance(0.5); // half of 1.0 second
+    try testing.expectApproxEqAbs(@as(f32, 50), anim.value(), 0.5);
+    try testing.expect(!anim.isFinished());
+}
+
+test "Animation finishes when elapsed >= duration" {
+    var anim = ui.Animation.init(0, 100, 0.5, ui.Easing.linear);
+    anim.advance(0.6);
+    try testing.expect(anim.isFinished());
+    try testing.expectApproxEqAbs(@as(f32, 100), anim.value(), 0.01);
+}
+
+test "Animation with ease_in curves correctly" {
+    var anim = ui.Animation.init(0, 100, 1.0, ui.Easing.ease_in);
+    anim.advance(0.5);
+    const val = anim.value();
+    // ease_in at 50% should be less than linear 50
+    try testing.expect(val < 50);
+    try testing.expect(val > 0);
+}
+
+test "Animation advance clamps at 1.0" {
+    var anim = ui.Animation.init(0, 100, 0.2, ui.Easing.linear);
+    anim.advance(10.0); // way past duration
+    try testing.expectApproxEqAbs(@as(f32, 100), anim.value(), 0.01);
+    try testing.expectApproxEqAbs(@as(f32, 1.0), anim.progress, 0.01);
+}
+
+// ── Phase 6: Action / keybinding tests ──────────────────────────────
+
+test "KeyCombo basic construction" {
+    const combo = ui.KeyCombo{ .key = .a, .modifiers = .{ .super = true } };
+    try testing.expect(combo.key == .a);
+    try testing.expect(combo.modifiers.super);
+    try testing.expect(!combo.modifiers.shift);
+}
+
+test "KeyCombo eql matches same combo" {
+    const a = ui.KeyCombo{ .key = .s, .modifiers = .{ .super = true } };
+    const b = ui.KeyCombo{ .key = .s, .modifiers = .{ .super = true } };
+    try testing.expect(a.eql(b));
+}
+
+test "KeyCombo eql rejects different key" {
+    const a = ui.KeyCombo{ .key = .s, .modifiers = .{ .super = true } };
+    const b = ui.KeyCombo{ .key = .z, .modifiers = .{ .super = true } };
+    try testing.expect(!a.eql(b));
+}
+
+test "KeyCombo eql rejects different modifiers" {
+    const a = ui.KeyCombo{ .key = .s, .modifiers = .{ .super = true } };
+    const b = ui.KeyCombo{ .key = .s, .modifiers = .{ .ctrl = true } };
+    try testing.expect(!a.eql(b));
+}
+
+test "KeybindingTable bind and dispatch" {
+    var fired: bool = false;
+    var table = ui.KeybindingTable.init(testing.allocator);
+    defer table.deinit();
+
+    table.bind(
+        .{ .key = .s, .modifiers = .{ .super = true } },
+        @ptrCast(&fired),
+        &struct {
+            fn cb(ctx: ?*anyopaque) void {
+                const f: *bool = @ptrCast(@alignCast(ctx.?));
+                f.* = true;
+            }
+        }.cb,
+    );
+
+    // Dispatch matching combo
+    const handled = table.dispatch(.{ .key = .s, .modifiers = .{ .super = true } });
+    try testing.expect(handled);
+    try testing.expect(fired);
+}
+
+test "KeybindingTable dispatch returns false for unbound combo" {
+    var table = ui.KeybindingTable.init(testing.allocator);
+    defer table.deinit();
+
+    const handled = table.dispatch(.{ .key = .q, .modifiers = .{} });
+    try testing.expect(!handled);
+}
+
+test "KeybindingTable multiple bindings" {
+    var count: u32 = 0;
+    var table = ui.KeybindingTable.init(testing.allocator);
+    defer table.deinit();
+
+    const cb = &struct {
+        fn cb(ctx: ?*anyopaque) void {
+            const c: *u32 = @ptrCast(@alignCast(ctx.?));
+            c.* += 1;
+        }
+    }.cb;
+
+    table.bind(.{ .key = .a, .modifiers = .{} }, @ptrCast(&count), cb);
+    table.bind(.{ .key = .b, .modifiers = .{} }, @ptrCast(&count), cb);
+
+    _ = table.dispatch(.{ .key = .a, .modifiers = .{} });
+    _ = table.dispatch(.{ .key = .b, .modifiers = .{} });
+    try testing.expectEqual(@as(u32, 2), count);
+}
+
+test "Modifiers default all false" {
+    const m = ui.Modifiers{};
+    try testing.expect(!m.shift);
+    try testing.expect(!m.ctrl);
+    try testing.expect(!m.alt);
+    try testing.expect(!m.super);
+}
