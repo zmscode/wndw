@@ -2271,6 +2271,11 @@ fn delegate_window_did_resize(self: objc.id, _: objc.SEL, _: objc.id) callconv(.
     if (objc.msgSend(objc.BOOL, win.ns_window, "isZoomed", .{}) != objc.NO) {
         win.queue.push(.maximized);
     }
+
+    // Trigger a redraw during live resize. AppKit blocks the normal event
+    // loop while the user drags a window edge, but it will still honour
+    // setNeedsDisplay and call drawRect: inside the modal tracking loop.
+    win.requestRedraw();
 }
 
 /// `windowDidMove:` — window was dragged to a new position.

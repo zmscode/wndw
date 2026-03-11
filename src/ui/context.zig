@@ -7,6 +7,7 @@ const std = @import("std");
 const element_mod = @import("element.zig");
 const paint_mod = @import("render/paint.zig");
 const renderer_mod = @import("render/native.zig");
+const render_types = @import("render_types");
 
 pub const Element = element_mod.Element;
 pub const Div = element_mod.Div;
@@ -15,6 +16,7 @@ pub const Renderer = renderer_mod.Renderer;
 pub const Constraints = element_mod.Constraints;
 pub const Rect = element_mod.Rect;
 pub const Size = element_mod.Size;
+pub const TextMeasurer = render_types.TextMeasurer;
 
 /// A type-erased render function: given an allocator (frame arena),
 /// returns the root Element for this frame.
@@ -91,11 +93,17 @@ pub const WindowContext = struct {
         self.needs_render = false;
     }
 
+    /// Get the text measurer from the platform renderer.
+    pub fn textMeasurer(self: *WindowContext) TextMeasurer {
+        return self.renderer.textMeasurer();
+    }
+
     /// Flush draw commands to the native renderer.
     pub fn flush(self: *WindowContext) void {
         self.renderer.flush(
             self.paint_cx.draw_list.quads.items,
             self.paint_cx.draw_list.clips.items,
+            self.paint_cx.draw_list.texts.items,
             @floatCast(self.view_height),
         );
     }

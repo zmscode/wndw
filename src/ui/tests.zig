@@ -732,6 +732,115 @@ test "flex_shrink with gap accounts for gap in overflow" {
     try testing.expectApproxEqAbs(@as(f32, 100), px.draw_list.quads.items[1].bounds[0], 0.1);
 }
 
+// ── Re-measurement / Taffy-inspired tests ───────────────────────────
+
+test "stretched flex_grow children get correct width after re-layout" {
+    // Scenario: column parent (tight 400x300) with auto-width row child.
+    // Row child has flex_grow children. Parent stretches row to 400.
+    // After re-layout, flex_grow children should fill the 400px.
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var px = ui.PaintContext.init(testing.allocator);
+    defer px.deinit();
+
+    // Row with two flex_grow children (no explicit width)
+    const g1 = ui.div(alloc).bg(ui.Color.hex(0xFF0000)).height(30).grow(1).into_element();
+    const g2 = ui.div(alloc).bg(ui.Color.hex(0x00FF00)).height(30).grow(1).into_element();
+    const row = ui.div(alloc).flex_row().child(g1).child(g2).into_element();
+
+    // Column parent — default align_items is stretch → row stretched to 400
+    const col = ui.div(alloc).flex_col().child(row).into_element();
+    _ = col.doLayout(ui.Constraints.tight(400, 300));
+    col.paint(&px, .{ .x = 0, .y = 0, .w = 400, .h = 300 });
+
+    // Each flex_grow child should be 200px wide (400 / 2)
+    try testing.expectApproxEqAbs(@as(f32, 200), px.draw_list.quads.items[0].bounds[2], 1.0);
+    try testing.expectApproxEqAbs(@as(f32, 200), px.draw_list.quads.items[1].bounds[2], 1.0);
+}
+
+test "stretched flex_grow with gap after re-layout" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var px = ui.PaintContext.init(testing.allocator);
+    defer px.deinit();
+
+    const g1 = ui.div(alloc).bg(ui.Color.hex(0xFF0000)).height(30).grow(1).into_element();
+    const g2 = ui.div(alloc).bg(ui.Color.hex(0x00FF00)).height(30).grow(2).into_element();
+    const g3 = ui.div(alloc).bg(ui.Color.hex(0x0000FF)).height(30).grow(1).into_element();
+    const row = ui.div(alloc).flex_row().gap(8).child(g1).child(g2).child(g3).into_element();
+
+    const col = ui.div(alloc).flex_col().child(row).into_element();
+    _ = col.doLayout(ui.Constraints.tight(400, 300));
+    col.paint(&px, .{ .x = 0, .y = 0, .w = 400, .h = 300 });
+
+    // Content = 400, gaps = 16, remaining = 384
+    // grow(1:2:1) → 96, 192, 96
+    try testing.expectApproxEqAbs(@as(f32, 96), px.draw_list.quads.items[0].bounds[2], 1.0);
+    try testing.expectApproxEqAbs(@as(f32, 192), px.draw_list.quads.items[1].bounds[2], 1.0);
+    try testing.expectApproxEqAbs(@as(f32, 96), px.draw_list.quads.items[2].bounds[2], 1.0);
+}
+
+test "padded parent stretches flex_grow row correctly" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var px = ui.PaintContext.init(testing.allocator);
+    defer px.deinit();
+
+    const g1 = ui.div(alloc).bg(ui.Color.hex(0xFF0000)).height(30).grow(1).into_element();
+    const g2 = ui.div(alloc).bg(ui.Color.hex(0x00FF00)).height(30).grow(1).into_element();
+    const row = ui.div(alloc).flex_row().child(g1).child(g2).into_element();
+
+    const col = ui.div(alloc).flex_col().padding_all(20).child(row).into_element();
+    _ = col.doLayout(ui.Constraints.tight(400, 300));
+    col.paint(&px, .{ .x = 0, .y = 0, .w = 400, .h = 300 });
+
+    // Content width = 400 - 40 = 360, each child = 180
+    // Quads: parent bg (none), row bg (none), so just the 2 grow children
+    try testing.expectApproxEqAbs(@as(f32, 180), px.draw_list.quads.items[0].bounds[2], 1.0);
+    try testing.expectApproxEqAbs(@as(f32, 180), px.draw_list.quads.items[1].bounds[2], 1.0);
+}
+
+test "deeply nested flex_grow re-layout works" {
+    // Root (col, 400x300) → section (col, auto, stretched) → row (auto, stretched)
+    // → flex_grow children
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var px = ui.PaintContext.init(testing.allocator);
+    defer px.deinit();
+
+    const g1 = ui.div(alloc).bg(ui.Color.hex(0xFF0000)).height(30).grow(1).into_element();
+    const g2 = ui.div(alloc).bg(ui.Color.hex(0x00FF00)).height(30).grow(1).into_element();
+    const row = ui.div(alloc).flex_row().child(g1).child(g2).into_element();
+
+    const section = ui.div(alloc)
+        .bg(ui.Color.hex(0x333333))
+        .padding_all(10)
+        .child(row)
+        .into_element();
+
+    const root = ui.div(alloc).flex_col().padding_all(10).child(section).into_element();
+    _ = root.doLayout(ui.Constraints.tight(400, 300));
+    root.paint(&px, .{ .x = 0, .y = 0, .w = 400, .h = 300 });
+
+    // Root content = 380, section stretched to 380, section content = 360
+    // row stretched to 360, each grow child = 180
+    const q0 = px.draw_list.quads.items[0]; // section bg
+    try testing.expectApproxEqAbs(@as(f32, 380), q0.bounds[2], 1.0);
+
+    const q1 = px.draw_list.quads.items[1]; // g1
+    const q2 = px.draw_list.quads.items[2]; // g2
+    try testing.expectApproxEqAbs(@as(f32, 180), q1.bounds[2], 1.0);
+    try testing.expectApproxEqAbs(@as(f32, 180), q2.bounds[2], 1.0);
+}
+
 // ── WindowContext tests ─────────────────────────────────────────────
 
 test "WindowContext init and deinit" {
@@ -803,4 +912,138 @@ test "Style defaults are sensible" {
     try testing.expect(s.background == null);
     try testing.expectEqual(@as(f32, 1.0), s.opacity);
     try testing.expectEqual(@as(f32, 0), s.border_width);
+}
+
+// ── Phase 3: Text element tests ─────────────────────────────────────
+
+/// Stub text measurer for testing — returns width = 7 * len, height = font_size.
+fn stubMeasureFn(_: *anyopaque, txt: []const u8, font_size: f32, _: u8, _: f32) ui.TextMetrics {
+    return .{
+        .width = 7.0 * @as(f32, @floatFromInt(txt.len)),
+        .height = font_size,
+        .ascent = font_size * 0.8,
+        .descent = font_size * 0.2,
+    };
+}
+
+var stub_measurer_ctx: u8 = 0;
+const stub_measurer = ui.TextMeasurer{
+    .ctx = @ptrCast(&stub_measurer_ctx),
+    .measure_fn = &stubMeasureFn,
+};
+
+test "Text element fluent API sets properties" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const t = ui.text(alloc, "Hello", stub_measurer)
+        .font_size(18)
+        .color(ui.Color.hex(0xFF0000))
+        .font_weight(.bold);
+
+    try testing.expectEqual(@as(f32, 18), t.font_size_val);
+    try testing.expect(t.color_val.eql(ui.Color.hex(0xFF0000)));
+    try testing.expectEqual(ui.FontWeight.bold, t.weight_val);
+}
+
+test "Text element layout returns measured size" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const el = ui.text(alloc, "Hello", stub_measurer)
+        .font_size(14)
+        .into_element();
+
+    const sz = el.doLayout(ui.Constraints{ .max_w = 800, .max_h = 600 });
+    // "Hello" = 5 chars, stub returns 7*5=35 wide, 14 high
+    try testing.expectApproxEqAbs(@as(f32, 35), sz.w, 0.1);
+    try testing.expectApproxEqAbs(@as(f32, 14), sz.h, 0.1);
+}
+
+test "Text element layout clamps to constraints" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const el = ui.text(alloc, "A very long string for testing", stub_measurer)
+        .font_size(14)
+        .into_element();
+
+    // 30 chars * 7 = 210, but constrained to max_w=100
+    const sz = el.doLayout(ui.Constraints{ .max_w = 100, .max_h = 600 });
+    try testing.expect(sz.w <= 100);
+}
+
+test "Text element paint emits TextCmd" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var px = ui.PaintContext.init(testing.allocator);
+    defer px.deinit();
+
+    const el = ui.text(alloc, "Hi", stub_measurer)
+        .font_size(16)
+        .color(ui.Color.hex(0x00FF00))
+        .into_element();
+
+    _ = el.doLayout(ui.Constraints{ .max_w = 800, .max_h = 600 });
+    el.paint(&px, .{ .x = 10, .y = 20, .w = 100, .h = 16 });
+
+    try testing.expectEqual(@as(usize, 1), px.draw_list.texts.items.len);
+    const cmd = px.draw_list.texts.items[0];
+    try testing.expectEqualStrings("Hi", cmd.text);
+    try testing.expectApproxEqAbs(@as(f32, 10), cmd.bounds[0], 0.1);
+    try testing.expectApproxEqAbs(@as(f32, 20), cmd.bounds[1], 0.1);
+    try testing.expectApproxEqAbs(@as(f32, 16), cmd.font_size, 0.1);
+}
+
+test "Text inside Div layout and paint" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var px = ui.PaintContext.init(testing.allocator);
+    defer px.deinit();
+
+    const label = ui.text(alloc, "Click", stub_measurer)
+        .font_size(14)
+        .color(ui.Color.hex(0xFFFFFF))
+        .into_element();
+
+    const btn = ui.div(alloc)
+        .bg(ui.Color.hex(0x0000FF))
+        .padding_all(8)
+        .flex_row()
+        .align_center()
+        .justify_center()
+        .child(label)
+        .into_element();
+
+    _ = btn.doLayout(ui.Constraints{ .max_w = 200, .max_h = 50 });
+    btn.paint(&px, .{ .x = 0, .y = 0, .w = 200, .h = 50 });
+
+    // Should have 1 quad (button bg) + 1 text
+    try testing.expectEqual(@as(usize, 1), px.draw_list.quads.items.len);
+    try testing.expectEqual(@as(usize, 1), px.draw_list.texts.items.len);
+    try testing.expectEqualStrings("Click", px.draw_list.texts.items[0].text);
+}
+
+test "DrawList pushText and clear" {
+    var dl = ui.DrawList{};
+    defer dl.deinit(testing.allocator);
+
+    dl.pushText(testing.allocator, .{
+        .text = "test",
+        .bounds = .{ 0, 0, 50, 14 },
+        .color = .{ 1, 1, 1, 1 },
+        .font_size = 14,
+        .weight = 3,
+    });
+    try testing.expectEqual(@as(usize, 1), dl.texts.items.len);
+
+    dl.clear();
+    try testing.expectEqual(@as(usize, 0), dl.texts.items.len);
 }

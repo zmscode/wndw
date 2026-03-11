@@ -2202,13 +2202,34 @@ Build incrementally. Each phase produces a working demo.
 
 4. **`align` is a reserved word in Zig**. Variable named `alignment` instead.
 
-### Phase 3: Text rendering — GPUI-style glyph atlas (2–3 days)
+### Phase 3: Text rendering ✅ DONE
 
-- CoreText `extern fn` declarations for text shaping + measurement
-- CoreGraphics glyph rasterization into `GlyphAtlas` (rasterize-once, cache)
-- `Text` element with `font_size()`, `color()`, `font_weight()`
-- Native backend: blit cached glyph bitmaps via `CGContextDrawImage`
-- **Demo**: Labels inside buttons, paragraph text
+- CoreText `extern fn` declarations (`coretext.zig`) for font creation, glyph mapping, metrics
+- `GlyphAtlas` with shelf-packing for measurement/advance caching (`text.zig`)
+- `Text` element with fluent API: `font_size()`, `color()`, `font_weight()` (`ui/text.zig`)
+- `TextCmd` draw command, `TextMeasurer` interface in shared `render_types`
+- Rendering via `CTFontDrawGlyphs` — batch glyph drawing with CG context unflip
+- `FontWeight` enum (ultralight through black), `MacTextBackend` with font cache
+- 6 new tests (59 total): fluent API, layout measurement, paint emit, constraints, text-in-div, DrawList
+- **Demo**: `text_demo.zig` — titles, labeled buttons, font size showcase, user card, status bar
+- Live resize support via `requestRedraw()` from `windowDidResize:` delegate
+
+**Architecture decisions:**
+
+1. **Platform-agnostic Text element** with `TextMeasurer` function pointer interface.
+   The measurer is provided by the platform renderer, passed at construction time.
+   No vtable changes needed — keeps Element interface stable.
+
+2. **CTFontDrawGlyphs for rendering** instead of atlas bitmap blitting. CoreText
+   handles glyph positioning, hinting, and subpixel rendering natively. The atlas
+   still caches advance widths for fast measurement.
+
+3. **Local context unflip for text drawing.** The flush() context is flipped (top-down).
+   `CTFontDrawGlyphs` expects CG's native bottom-up system. Solution: `CGContextScaleCTM(1, -1)`
+   with negated y positions for the draw call.
+
+4. **`FontWeight` as platform-agnostic enum** in style.zig, converted to ordinal for
+   the measurer/renderer. System font (`.AppleSystemUIFont`) via toll-free bridged NSString.
 
 ### Phase 4: Interaction (1–2 days)
 
@@ -2254,19 +2275,17 @@ src/
 │   ├── element.zig                ← Element vtable, Div [Phase 1 ✅]
 │   ├── style.zig                  ← Style, Color, Len, Edges [Phase 1 ✅]
 │   ├── layout.zig                 ← Constraints, Rect, Size [Phase 1 ✅]
-│   ├── tests.zig                  ← UI unit tests (29 tests) [Phase 1 ✅]
+│   ├── text.zig                   ← Text element, fluent API [Phase 3 ✅]
+│   ├── tests.zig                  ← UI unit tests (59 tests) [Phase 1-3 ✅]
 │   ├── entity.zig                 ← EntityPool, Handle(T), EntityId
 │   ├── view.zig                   ← View(T), AnyView
 │   ├── theme.zig                  ← Theme, dark/light presets
 │   ├── action.zig                 ← Action union, KeybindingTable
 │   ├── animation.zig              ← Animation, Easing
-│   ├── text/
-│   │   ├── measurer.zig           ← CoreText extern fns, TextMeasurer
-│   │   └── atlas.zig              ← GlyphAtlas, rasterization
 │   └── render/
-│       ├── types.zig              ← QuadCmd, ClipCmd (shared module) [Phase 1 ✅]
-│       ├── draw_list.zig          ← DrawList (quad/clip accumulator) [Phase 1 ✅]
-│       ├── paint.zig              ← PaintContext [Phase 1 ✅]
+│       ├── types.zig              ← QuadCmd, ClipCmd, TextCmd, TextMeasurer [Phase 1+3 ✅]
+│       ├── draw_list.zig          ← DrawList (quad/clip/text accumulator) [Phase 1+3 ✅]
+│       ├── paint.zig              ← PaintContext [Phase 1+3 ✅]
 │       ├── native.zig             ← Renderer import from wndw [Phase 1 ✅]
 │       └── opengl.zig             ← GlRenderer (SDF shaders, opt-in)
 ├── platform/
@@ -2275,7 +2294,9 @@ src/
 │       ├── objc.zig               ← ObjC runtime extern fns
 │       ├── cocoa.zig              ← AppKit numeric constants
 │       ├── keymap.zig             ← hardware keycode mapping
-│       └── renderer.zig           ← CoreGraphics quad renderer [Phase 1 ✅]
+│       ├── coretext.zig           ← CoreText extern fns + helpers [Phase 3 ✅]
+│       ├── text.zig               ← GlyphAtlas, MacTextBackend [Phase 3 ✅]
+│       └── renderer.zig           ← CG quad + text renderer [Phase 1+3 ✅]
 ├── event.zig                      ← platform-agnostic event types
 ├── event_queue.zig                ← lock-free circular buffer
 └── root.zig                       ← wndw public API + Renderer export

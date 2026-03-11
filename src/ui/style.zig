@@ -70,6 +70,17 @@ pub const FlexDirection = enum { row, column, row_reverse, column_reverse };
 pub const FlexWrap = enum { no_wrap, wrap };
 pub const Align = enum { start, end, center, stretch };
 pub const Justify = enum { start, end, center, space_between, space_around, space_evenly };
+pub const FontWeight = enum(u8) {
+    ultralight = 0,
+    thin = 1,
+    light = 2,
+    regular = 3,
+    medium = 4,
+    semibold = 5,
+    bold = 6,
+    heavy = 7,
+    black = 8,
+};
 pub const Overflow = enum { visible, hidden, scroll };
 pub const Position = enum { relative, absolute };
 

@@ -79,8 +79,17 @@ fn renderUI(alloc: @import("std").mem.Allocator) ui.Element {
 
 // Global context pointer for the draw callback
 var g_cx: *ui.WindowContext = undefined;
+var g_win: *wndw.Window = undefined;
 
 fn drawCallback(_: ?*anyopaque) void {
+    const sz = g_win.getSize();
+    const w: f32 = @floatFromInt(sz.w);
+    const h: f32 = @floatFromInt(sz.h);
+    if (w != g_cx.view_width or h != g_cx.view_height) {
+        g_cx.setViewSize(w, h);
+        g_cx.render();
+        g_cx.resetFrame();
+    }
     g_cx.flush();
 }
 
@@ -103,6 +112,7 @@ pub fn main() !void {
 
     // Store context globally for the draw callback
     g_cx = &cx;
+    g_win = win;
     win.setDrawCallback(null, &drawCallback);
 
     while (!win.shouldClose()) {

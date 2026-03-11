@@ -11,10 +11,12 @@ const types = @import("render_types");
 
 pub const QuadCmd = types.QuadCmd;
 pub const ClipCmd = types.ClipCmd;
+pub const TextCmd = types.TextCmd;
 
 pub const DrawList = struct {
     quads: std.ArrayListUnmanaged(QuadCmd) = .{},
     clips: std.ArrayListUnmanaged(ClipCmd) = .{},
+    texts: std.ArrayListUnmanaged(TextCmd) = .{},
 
     pub fn pushQuad(self: *DrawList, alloc: std.mem.Allocator, q: QuadCmd) void {
         self.quads.append(alloc, q) catch unreachable;
@@ -24,13 +26,19 @@ pub const DrawList = struct {
         self.clips.append(alloc, c) catch unreachable;
     }
 
+    pub fn pushText(self: *DrawList, alloc: std.mem.Allocator, t: TextCmd) void {
+        self.texts.append(alloc, t) catch unreachable;
+    }
+
     pub fn clear(self: *DrawList) void {
         self.quads.clearRetainingCapacity();
         self.clips.clearRetainingCapacity();
+        self.texts.clearRetainingCapacity();
     }
 
     pub fn deinit(self: *DrawList, alloc: std.mem.Allocator) void {
         self.quads.deinit(alloc);
         self.clips.deinit(alloc);
+        self.texts.deinit(alloc);
     }
 };

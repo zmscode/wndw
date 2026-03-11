@@ -9,6 +9,7 @@ const layout = @import("../layout.zig");
 
 pub const DrawList = draw_list_mod.DrawList;
 pub const QuadCmd = draw_list_mod.QuadCmd;
+pub const TextCmd = draw_list_mod.TextCmd;
 
 pub const PaintContext = struct {
     draw_list: DrawList = .{},
@@ -41,6 +42,14 @@ pub const PaintContext = struct {
         const rect = self.clip_stack.items[self.clip_stack.items.len - 1];
         self.draw_list.pushClip(self.alloc, .{ .bounds = .{ rect.x, rect.y, rect.w, rect.h } });
         return @intCast(self.draw_list.clips.items.len - 1);
+    }
+
+    pub fn pushText(self: *PaintContext, t: TextCmd) void {
+        var cmd = t;
+        if (cmd.clip_index < 0 and self.clip_stack.items.len > 0) {
+            cmd.clip_index = self.currentClipIndex();
+        }
+        self.draw_list.pushText(self.alloc, cmd);
     }
 
     pub fn deinit(self: *PaintContext) void {

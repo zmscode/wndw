@@ -258,6 +258,7 @@ pub fn main() !void {
                 .refresh_requested => {},
                 .text_input => |ti| std.debug.print("text: {s}\n", .{ti.text}),
                 .appearance_changed => |a| std.debug.print("appearance: {}\n", .{a}),
+                else => {},
             }
         }
 

@@ -379,7 +379,7 @@ pub const Div = struct {
 
         for (self.children_list.items, 0..) |ch, i| {
             const csz = child_sizes[i];
-            const child_main = if (is_row) csz.w else csz.h;
+            var child_main = if (is_row) csz.w else csz.h;
             const child_cross = if (is_row) csz.h else csz.w;
 
             // Cross-axis alignment
@@ -398,6 +398,21 @@ pub const Div = struct {
                 .stretch => {
                     cross_size = final_content_cross;
                 },
+            }
+
+            // Re-layout child if its final size differs from measured size.
+            // This handles: stretch making cross-axis larger, flex_grow making
+            // main-axis larger. The child's internal layout (e.g. its own
+            // flex_grow children) needs the resolved size to distribute space.
+            const final_w = if (is_row) child_main else cross_size;
+            const final_h = if (is_row) cross_size else child_main;
+            const measured_w = csz.w;
+            const measured_h = csz.h;
+            if (@abs(final_w - measured_w) > 0.5 or @abs(final_h - measured_h) > 0.5) {
+                const resized = ch.doLayout(Constraints.tight(final_w, final_h));
+                // Update main/cross from re-layout result
+                child_main = if (is_row) resized.w else resized.h;
+                cross_size = if (is_row) resized.h else resized.w;
             }
 
             const cl = if (is_row) ChildLayout{

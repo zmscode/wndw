@@ -170,8 +170,20 @@ fn renderUI(alloc: std.mem.Allocator) ui.Element {
 }
 
 var g_cx: *ui.WindowContext = undefined;
+var g_win: *wndw.Window = undefined;
 
 fn drawCallback(_: ?*anyopaque) void {
+    // During live resize, the normal event loop is blocked by AppKit's
+    // modal tracking loop. Detect size changes here and re-render so
+    // the layout updates continuously as the user drags.
+    const sz = g_win.getSize();
+    const w: f32 = @floatFromInt(sz.w);
+    const h: f32 = @floatFromInt(sz.h);
+    if (w != g_cx.view_width or h != g_cx.view_height) {
+        g_cx.setViewSize(w, h);
+        g_cx.render();
+        g_cx.resetFrame();
+    }
     g_cx.flush();
 }
 
@@ -193,6 +205,7 @@ pub fn main() !void {
     cx.setViewSize(@floatFromInt(initial_size.w), @floatFromInt(initial_size.h));
 
     g_cx = &cx;
+    g_win = win;
     win.setDrawCallback(null, &drawCallback);
 
     while (!win.shouldClose()) {

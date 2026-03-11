@@ -45,6 +45,7 @@ pub fn build(b: *std.Build) void {
             mod.linkFramework("Cocoa", .{});
             mod.linkFramework("Carbon", .{});
             mod.linkFramework("CoreVideo", .{});
+            mod.linkFramework("CoreText", .{});
         },
         else => {},
     }
