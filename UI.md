@@ -2289,7 +2289,84 @@ Build incrementally. Each phase produces a working demo.
 - Action/keybinding system
 - **Demo**: Scrollable list with theme toggle and keyboard shortcuts
 
-### Phase 7: OpenGL backend (optional, 2–3 days)
+### Phase 7: Component Library — Foundation (3–4 days)
+
+Build-out of reusable, styled components on top of the element primitives.
+Each component is a Zig struct with a fluent API that returns an `Element`.
+Inspired by [gpui-component](https://github.com/longbridge/gpui-component) (60+ components for GPUI/Rust).
+
+**Inputs & Controls:**
+- `Button` — primary/secondary/ghost/danger variants, disabled state, icon slot, loading spinner
+- `IconButton` — compact square button with just an icon
+- `Checkbox` — checked/unchecked/indeterminate, label, on_change callback
+- `Radio` — radio group with mutual exclusion, on_change
+- `Switch` — toggle switch with on/off state, animated thumb
+- `Slider` — horizontal/vertical, range, step, on_change
+- `TextInput` — single-line input, placeholder, selection, cursor, on_submit
+- `TextArea` — multi-line input with scroll
+- `Select` — dropdown menu with options, search/filter, on_select
+- `ColorPicker` — hue/saturation/lightness picker, hex input
+
+**Display & Typography:**
+- `Label` — styled text with size variants (xs/sm/md/lg), truncation, wrapping
+- `Icon` — SVG/glyph icon with size and color
+- `Badge` — notification count or status dot
+- `Tag` — colored label chip, removable variant
+- `Tooltip` — hover-triggered floating text
+- `Kbd` — keyboard shortcut display (e.g. `⌘S`)
+- `Skeleton` — loading placeholder with pulse animation
+- `Spinner` — circular loading indicator
+- `Rating` — star rating (read-only or interactive)
+
+**Layout & Structure:**
+- `Divider` — horizontal/vertical line with optional label
+- `Accordion` — collapsible sections with header + content
+- `Collapsible` — single collapsible panel
+- `GroupBox` — bordered group with title
+- `Breadcrumb` — navigation breadcrumb trail
+- `Stepper` — numbered step indicator (wizard flow)
+- `Tabs` — tabbed content panels, on_select
+
+**Overlays & Feedback:**
+- `Popover` — anchored floating panel (click to toggle)
+- `HoverCard` — floating card on hover (preview)
+- `Dialog` — modal dialog with title, body, actions
+- `Sheet` — slide-in panel from edge (side sheet)
+- `Alert` — inline alert banner (info/warning/error/success)
+- `Notification` — toast-style notification, auto-dismiss
+- `Progress` — linear progress bar, determinate/indeterminate
+
+**Data & Lists:**
+- `List` — virtualized list with dynamic row heights
+- `VirtualList` — high-performance list for 100K+ items
+- `Table` — columns, sorting, row selection, virtualized
+- `DescriptionList` — key-value pair display
+- `Tree` — expandable/collapsible tree view
+- `Pagination` — page controls for paginated data
+- `Menu` — context menu / dropdown menu with items, dividers, submenus
+
+**Navigation:**
+- `Sidebar` — collapsible sidebar with sections and items
+- `TitleBar` — custom window title bar (integrates with `wndw` inset titlebar)
+- `Link` — clickable text link with hover underline
+
+**Demo**: Component showcase app — tabbed gallery showing every component
+with live interactive examples.
+
+### Phase 8: Component Library — Advanced (3–4 days)
+
+- `Resizable` — resizable panels with drag handles
+- `Dock` — dockable/undockable panel layout (IDE-style)
+- `Form` — form container with validation, field layout, submit
+- `Clipboard` — copy/paste integration via `wndw` clipboard API
+- `FocusTrap` — keyboard focus containment for modals/dialogs
+- `Animation` — declarative spring/ease/tween animations on any property
+- `Theme` — light/dark mode, custom color tokens, responds to `wndw.appearance_changed`
+- `ActionSystem` — keybinding table, command palette dispatch
+
+**Demo**: IDE-style layout with dock panels, resizable splits, command palette
+
+### Phase 9: OpenGL backend (optional, 2–3 days)
 
 - `GlRenderer` with SDF quad + glyph shaders
 - GL atlas texture (upload same rasterized glyph data to GL texture)
