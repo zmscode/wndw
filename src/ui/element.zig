@@ -9,6 +9,7 @@ const style_mod = @import("style.zig");
 const layout_mod = @import("layout.zig");
 const paint_mod = @import("render/paint.zig");
 const draw_list_mod = @import("render/draw_list.zig");
+const interaction_mod = @import("interaction.zig");
 
 pub const Style = style_mod.Style;
 pub const Color = style_mod.Color;
@@ -23,6 +24,9 @@ pub const Constraints = layout_mod.Constraints;
 pub const ChildLayout = layout_mod.ChildLayout;
 pub const PaintContext = paint_mod.PaintContext;
 pub const QuadCmd = draw_list_mod.QuadCmd;
+pub const Callback = interaction_mod.Callback;
+pub const HitBox = interaction_mod.HitBox;
+pub const Cursor = interaction_mod.Cursor;
 
 // ── Element vtable ──────────────────────────────────────────────────
 
@@ -57,6 +61,12 @@ pub const Div = struct {
     children_list: std.ArrayListUnmanaged(Element) = .{},
     child_layouts: std.ArrayListUnmanaged(ChildLayout) = .{},
     arena: std.mem.Allocator,
+
+    // ── Interaction ──────────────────────────────────────────────────
+    on_click_cb: Callback = .{},
+    on_mouse_enter_cb: Callback = .{},
+    on_mouse_leave_cb: Callback = .{},
+    hover_cursor: ?Cursor = null,
 
     // ── Fluent style methods ────────────────────────────────────────
 
@@ -171,6 +181,36 @@ pub const Div = struct {
     pub fn opacity(self: *Div, o: f32) *Div {
         self.sty.opacity = o;
         return self;
+    }
+
+    // ── Interaction ──────────────────────────────────────────────────
+
+    pub fn on_click(self: *Div, ctx: ?*anyopaque, func: *const fn (?*anyopaque) void) *Div {
+        self.on_click_cb = .{ .ctx = ctx, .func = func };
+        return self;
+    }
+
+    pub fn on_mouse_enter(self: *Div, ctx: ?*anyopaque, func: *const fn (?*anyopaque) void) *Div {
+        self.on_mouse_enter_cb = .{ .ctx = ctx, .func = func };
+        return self;
+    }
+
+    pub fn on_mouse_leave(self: *Div, ctx: ?*anyopaque, func: *const fn (?*anyopaque) void) *Div {
+        self.on_mouse_leave_cb = .{ .ctx = ctx, .func = func };
+        return self;
+    }
+
+    pub fn set_cursor(self: *Div, c: Cursor) *Div {
+        self.hover_cursor = c;
+        return self;
+    }
+
+    /// Returns true if this div has any interaction handlers.
+    pub fn isInteractive(self: *const Div) bool {
+        return self.on_click_cb.isSet() or
+            self.on_mouse_enter_cb.isSet() or
+            self.on_mouse_leave_cb.isSet() or
+            self.hover_cursor != null;
     }
 
     // ── Children ────────────────────────────────────────────────────
@@ -455,6 +495,17 @@ pub const Div = struct {
                 .shadow_color = shadow_vec,
                 .shadow_blur = s.shadow_blur,
                 .shadow_offset = s.shadow_offset,
+            });
+        }
+
+        // Register hit box for interactive elements
+        if (self.isInteractive()) {
+            px.pushHitBox(.{
+                .bounds = bounds,
+                .on_click = self.on_click_cb,
+                .on_mouse_enter = self.on_mouse_enter_cb,
+                .on_mouse_leave = self.on_mouse_leave_cb,
+                .cursor = self.hover_cursor,
             });
         }
 

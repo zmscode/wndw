@@ -1047,3 +1047,253 @@ test "DrawList pushText and clear" {
     dl.clear();
     try testing.expectEqual(@as(usize, 0), dl.texts.items.len);
 }
+
+// ── Interaction / Hit Testing tests ─────────────────────────────────
+
+test "HitTestList hitTest finds topmost box" {
+    var list = ui.HitTestList{};
+    defer list.deinit(testing.allocator);
+
+    // Push two overlapping boxes — second is "on top"
+    list.push(testing.allocator, .{
+        .bounds = .{ .x = 0, .y = 0, .w = 100, .h = 100 },
+    });
+    list.push(testing.allocator, .{
+        .bounds = .{ .x = 50, .y = 50, .w = 100, .h = 100 },
+    });
+
+    // Point in overlap region → returns topmost (index 1)
+    try testing.expectEqual(@as(?usize, 1), list.hitTest(75, 75));
+    // Point only in first box
+    try testing.expectEqual(@as(?usize, 0), list.hitTest(10, 10));
+    // Point outside both
+    try testing.expectEqual(@as(?usize, null), list.hitTest(200, 200));
+}
+
+test "HitTestList click fires callback" {
+    var clicked: bool = false;
+
+    var list = ui.HitTestList{};
+    defer list.deinit(testing.allocator);
+
+    list.push(testing.allocator, .{
+        .bounds = .{ .x = 10, .y = 10, .w = 80, .h = 40 },
+        .on_click = .{
+            .ctx = @ptrCast(&clicked),
+            .func = &struct {
+                fn cb(ctx: ?*anyopaque) void {
+                    const ptr: *bool = @ptrCast(@alignCast(ctx.?));
+                    ptr.* = true;
+                }
+            }.cb,
+        },
+    });
+
+    // Press and release on same box → click fires
+    list.handleMousePress(50, 30);
+    list.handleMouseRelease(50, 30);
+    try testing.expect(clicked);
+}
+
+test "HitTestList click does not fire on different box" {
+    var clicked: bool = false;
+
+    var list = ui.HitTestList{};
+    defer list.deinit(testing.allocator);
+
+    list.push(testing.allocator, .{
+        .bounds = .{ .x = 0, .y = 0, .w = 50, .h = 50 },
+        .on_click = .{
+            .ctx = @ptrCast(&clicked),
+            .func = &struct {
+                fn cb(ctx: ?*anyopaque) void {
+                    const ptr: *bool = @ptrCast(@alignCast(ctx.?));
+                    ptr.* = true;
+                }
+            }.cb,
+        },
+    });
+    list.push(testing.allocator, .{
+        .bounds = .{ .x = 60, .y = 0, .w = 50, .h = 50 },
+    });
+
+    // Press on first box, release on second → no click
+    list.handleMousePress(25, 25);
+    list.handleMouseRelease(75, 25);
+    try testing.expect(!clicked);
+}
+
+test "HitTestList hover fires enter/leave callbacks" {
+    var entered: bool = false;
+    var left: bool = false;
+
+    var list = ui.HitTestList{};
+    defer list.deinit(testing.allocator);
+
+    list.push(testing.allocator, .{
+        .bounds = .{ .x = 10, .y = 10, .w = 80, .h = 40 },
+        .on_mouse_enter = .{
+            .ctx = @ptrCast(&entered),
+            .func = &struct {
+                fn cb(ctx: ?*anyopaque) void {
+                    const ptr: *bool = @ptrCast(@alignCast(ctx.?));
+                    ptr.* = true;
+                }
+            }.cb,
+        },
+        .on_mouse_leave = .{
+            .ctx = @ptrCast(&left),
+            .func = &struct {
+                fn cb(ctx: ?*anyopaque) void {
+                    const ptr: *bool = @ptrCast(@alignCast(ctx.?));
+                    ptr.* = true;
+                }
+            }.cb,
+        },
+    });
+
+    // Move into box → enter fires
+    _ = list.handleMouseMove(50, 30);
+    try testing.expect(entered);
+    try testing.expect(!left);
+
+    // Move out of box → leave fires
+    _ = list.handleMouseMove(200, 200);
+    try testing.expect(left);
+}
+
+test "HitTestList hover returns cursor type" {
+    var list = ui.HitTestList{};
+    defer list.deinit(testing.allocator);
+
+    list.push(testing.allocator, .{
+        .bounds = .{ .x = 0, .y = 0, .w = 100, .h = 50 },
+        .cursor = .pointing_hand,
+    });
+
+    const cur = list.handleMouseMove(50, 25);
+    try testing.expectEqual(@as(?ui.Cursor, .pointing_hand), cur);
+
+    // Move outside → null cursor
+    const cur2 = list.handleMouseMove(200, 200);
+    try testing.expectEqual(@as(?ui.Cursor, null), cur2);
+}
+
+test "Div on_click registers hit box during paint" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var px = ui.PaintContext.init(testing.allocator);
+    defer px.deinit();
+
+    var clicked: bool = false;
+    const btn = ui.div(alloc)
+        .bg(ui.Color.hex(0xFF0000))
+        .size(100, 40)
+        .on_click(@ptrCast(&clicked), &struct {
+        fn cb(ctx: ?*anyopaque) void {
+            const ptr: *bool = @ptrCast(@alignCast(ctx.?));
+            ptr.* = true;
+        }
+    }.cb)
+        .into_element();
+
+    _ = btn.doLayout(ui.Constraints.tight(400, 200));
+    btn.paint(&px, .{ .x = 0, .y = 0, .w = 100, .h = 40 });
+
+    // Should have registered one hit box
+    try testing.expectEqual(@as(usize, 1), px.hit_list.boxes.items.len);
+
+    // Simulate click via hit list
+    px.hit_list.handleMousePress(50, 20);
+    px.hit_list.handleMouseRelease(50, 20);
+    try testing.expect(clicked);
+}
+
+test "Div set_cursor registers cursor in hit box" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var px = ui.PaintContext.init(testing.allocator);
+    defer px.deinit();
+
+    const btn = ui.div(alloc)
+        .bg(ui.Color.hex(0xFF0000))
+        .size(100, 40)
+        .set_cursor(.pointing_hand)
+        .into_element();
+
+    _ = btn.doLayout(ui.Constraints.tight(400, 200));
+    btn.paint(&px, .{ .x = 0, .y = 0, .w = 100, .h = 40 });
+
+    try testing.expectEqual(@as(usize, 1), px.hit_list.boxes.items.len);
+    try testing.expectEqual(@as(?ui.Cursor, .pointing_hand), px.hit_list.boxes.items[0].cursor);
+}
+
+test "Non-interactive div does not register hit box" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var px = ui.PaintContext.init(testing.allocator);
+    defer px.deinit();
+
+    const plain = ui.div(alloc)
+        .bg(ui.Color.hex(0xFF0000))
+        .size(100, 40)
+        .into_element();
+
+    _ = plain.doLayout(ui.Constraints.tight(400, 200));
+    plain.paint(&px, .{ .x = 0, .y = 0, .w = 100, .h = 40 });
+
+    try testing.expectEqual(@as(usize, 0), px.hit_list.boxes.items.len);
+}
+
+test "Nested interactive divs register in painter order" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var px = ui.PaintContext.init(testing.allocator);
+    defer px.deinit();
+
+    var outer_clicked: bool = false;
+    var inner_clicked: bool = false;
+
+    const inner = ui.div(alloc)
+        .bg(ui.Color.hex(0x00FF00))
+        .size(50, 30)
+        .on_click(@ptrCast(&inner_clicked), &struct {
+        fn cb(ctx: ?*anyopaque) void {
+            const ptr: *bool = @ptrCast(@alignCast(ctx.?));
+            ptr.* = true;
+        }
+    }.cb)
+        .into_element();
+
+    const outer = ui.div(alloc)
+        .bg(ui.Color.hex(0xFF0000))
+        .size(100, 60)
+        .on_click(@ptrCast(&outer_clicked), &struct {
+        fn cb(ctx: ?*anyopaque) void {
+            const ptr: *bool = @ptrCast(@alignCast(ctx.?));
+            ptr.* = true;
+        }
+    }.cb)
+        .child(inner)
+        .into_element();
+
+    _ = outer.doLayout(ui.Constraints.tight(400, 200));
+    outer.paint(&px, .{ .x = 0, .y = 0, .w = 100, .h = 60 });
+
+    // Outer registered first, inner registered second (painter order)
+    try testing.expectEqual(@as(usize, 2), px.hit_list.boxes.items.len);
+
+    // Click inside inner → topmost (inner) gets the click
+    px.hit_list.handleMousePress(25, 15);
+    px.hit_list.handleMouseRelease(25, 15);
+    try testing.expect(inner_clicked);
+    try testing.expect(!outer_clicked);
+}

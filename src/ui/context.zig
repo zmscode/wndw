@@ -8,6 +8,7 @@ const element_mod = @import("element.zig");
 const paint_mod = @import("render/paint.zig");
 const renderer_mod = @import("render/native.zig");
 const render_types = @import("render_types");
+const wndw = @import("wndw");
 
 pub const Element = element_mod.Element;
 pub const Div = element_mod.Div;
@@ -17,6 +18,7 @@ pub const Constraints = element_mod.Constraints;
 pub const Rect = element_mod.Rect;
 pub const Size = element_mod.Size;
 pub const TextMeasurer = render_types.TextMeasurer;
+pub const Cursor = wndw.Cursor;
 
 /// A type-erased render function: given an allocator (frame arena),
 /// returns the root Element for this frame.
@@ -81,8 +83,9 @@ pub const WindowContext = struct {
         const constraints = Constraints.tight(self.view_width, self.view_height);
         _ = root.doLayout(constraints);
 
-        // Paint pass — clear old commands first
+        // Paint pass — clear old commands and hit boxes
         self.paint_cx.draw_list.clear();
+        self.paint_cx.hit_list.clear();
         root.paint(&self.paint_cx, .{
             .x = 0,
             .y = 0,
@@ -106,5 +109,24 @@ pub const WindowContext = struct {
             self.paint_cx.draw_list.texts.items,
             @floatCast(self.view_height),
         );
+    }
+
+    // ── Mouse event dispatch ─────────────────────────────────────────
+
+    /// Dispatch a mouse move event. Returns the cursor to display
+    /// (null = default arrow).
+    pub fn handleMouseMove(self: *WindowContext, x: f32, y: f32) ?Cursor {
+        return self.paint_cx.hit_list.handleMouseMove(x, y);
+    }
+
+    /// Dispatch a mouse press event.
+    pub fn handleMousePress(self: *WindowContext, x: f32, y: f32) void {
+        self.paint_cx.hit_list.handleMousePress(x, y);
+    }
+
+    /// Dispatch a mouse release event. Fires on_click if press and
+    /// release hit the same element.
+    pub fn handleMouseRelease(self: *WindowContext, x: f32, y: f32) void {
+        self.paint_cx.hit_list.handleMouseRelease(x, y);
     }
 };

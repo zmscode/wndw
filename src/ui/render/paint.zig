@@ -6,14 +6,18 @@
 const std = @import("std");
 const draw_list_mod = @import("draw_list.zig");
 const layout = @import("../layout.zig");
+const interaction = @import("../interaction.zig");
 
 pub const DrawList = draw_list_mod.DrawList;
 pub const QuadCmd = draw_list_mod.QuadCmd;
 pub const TextCmd = draw_list_mod.TextCmd;
+pub const HitBox = interaction.HitBox;
+pub const HitTestList = interaction.HitTestList;
 
 pub const PaintContext = struct {
     draw_list: DrawList = .{},
     clip_stack: std.ArrayListUnmanaged(layout.Rect) = .{},
+    hit_list: HitTestList = .{},
     alloc: std.mem.Allocator,
 
     pub fn init(alloc: std.mem.Allocator) PaintContext {
@@ -52,8 +56,13 @@ pub const PaintContext = struct {
         self.draw_list.pushText(self.alloc, cmd);
     }
 
+    pub fn pushHitBox(self: *PaintContext, box: HitBox) void {
+        self.hit_list.push(self.alloc, box);
+    }
+
     pub fn deinit(self: *PaintContext) void {
         self.draw_list.deinit(self.alloc);
         self.clip_stack.deinit(self.alloc);
+        self.hit_list.deinit(self.alloc);
     }
 };

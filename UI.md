@@ -2231,13 +2231,31 @@ Build incrementally. Each phase produces a working demo.
 4. **`FontWeight` as platform-agnostic enum** in style.zig, converted to ordinal for
    the measurer/renderer. System font (`.AppleSystemUIFont`) via toll-free bridged NSString.
 
-### Phase 4: Interaction (1–2 days)
+### Phase 4: Interaction ✅ DONE
 
-- Hit box registration during paint
-- `on_click` dispatch from `wndw.mouse_pressed`
-- Cursor changes on hover via `wndw.setStandardCursor()`
-- Focus system basics
-- **Demo**: Clickable counter (increment/decrement buttons)
+- Hit box registration during paint (painter's order, back-to-front hit testing)
+- `on_click` dispatch — press+release on same element fires callback
+- `on_mouse_enter` / `on_mouse_leave` callbacks with hover tracking
+- Cursor changes on hover via `wndw.setStandardCursor()` / `resetCursor()`
+- `Callback` type: type-erased `fn(?*anyopaque) void` + context pointer
+- `HitTestList` in `PaintContext` — accumulated during paint, queried on mouse events
+- `WindowContext.handleMouseMove/Press/Release()` dispatches to hit test system
+- Fluent API: `.on_click(ctx, fn)`, `.set_cursor(.pointing_hand)`
+- **Demo**: `counter_demo` — increment/decrement/reset buttons with cursor changes
+
+**Architecture decisions:**
+
+1. **Hit boxes in PaintContext, not a separate tree**: Hit boxes are registered during
+   the paint phase alongside draw commands. This means the hit test list is always
+   consistent with what's rendered — no sync issues between layout and interaction.
+
+2. **Callback = ctx + fn pointer**: Rather than storing closures or vtables, callbacks
+   are a simple `{ ctx: ?*anyopaque, func: ?*const fn(?*anyopaque) void }`. This is
+   zero-cost when unused and trivially composable from Zig code.
+
+3. **Press+release click model**: `on_click` only fires when press and release hit the
+   same element. This matches native platform behavior — users can "cancel" a click
+   by dragging off the element before releasing.
 
 ### Phase 5: Reactivity (1–2 days)
 
@@ -2276,7 +2294,8 @@ src/
 │   ├── style.zig                  ← Style, Color, Len, Edges [Phase 1 ✅]
 │   ├── layout.zig                 ← Constraints, Rect, Size [Phase 1 ✅]
 │   ├── text.zig                   ← Text element, fluent API [Phase 3 ✅]
-│   ├── tests.zig                  ← UI unit tests (59 tests) [Phase 1-3 ✅]
+│   ├── interaction.zig            ← HitTestList, HitBox, Callback [Phase 4 ✅]
+│   ├── tests.zig                  ← UI unit tests (68 tests) [Phase 1-4 ✅]
 │   ├── entity.zig                 ← EntityPool, Handle(T), EntityId
 │   ├── view.zig                   ← View(T), AnyView
 │   ├── theme.zig                  ← Theme, dark/light presets
