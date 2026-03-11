@@ -2257,12 +2257,28 @@ Build incrementally. Each phase produces a working demo.
    same element. This matches native platform behavior — users can "cancel" a click
    by dragging off the element before releasing.
 
-### Phase 5: Reactivity (1–2 days)
+### Phase 5: Reactivity ✅ DONE
 
-- `EntityPool` and `Handle(T)` with generation checks
-- `View` interface — `render()` called when entity is dirty
-- Subscription/observer pattern (`handle.observe()`)
-- **Demo**: Multiple views observing a shared model
+- `EntityPool`: generational slab with type-erased slots, free list recycling
+- `Handle(T)`: typed wrapper with `read()` and `update()` (auto-notifies observers)
+- `View(T)`: wraps Handle, delegates `render()` to model, `subscribe()` sets dirty flag
+- Observer pattern: `pool.observe(id, ctx, fn)` — callbacks fire on `handle.update()`
+- Generation checks: stale handles caught by generation mismatch assertions
+- **Demo**: `observer_demo` — counter with stats panel, status bar, all observing shared state
+
+**Architecture decisions:**
+
+1. **Comptime-generated destroy fn per type**: Each slot stores a `DestroyFn` created via
+   `makeDestroyFn(T)` at comptime. This avoids storing size/alignment and lets us use
+   `gpa.destroy(ptr)` with correct type alignment — clean deallocation for any `T`.
+
+2. **Subscriptions as flat list**: Simple `ArrayList(Subscription)` rather than a per-entity
+   hash map. For typical UI entity counts (<100), linear scan is faster than hashing.
+   Subscriptions are cleaned up on `destroy()` via swap-remove.
+
+3. **View.subscribe() wires dirty flag**: Rather than coupling View to WindowContext, the
+   view just sets a `*bool` to true when its entity changes. The demo wires this to
+   `cx.needs_render`. This keeps View testable without the platform renderer.
 
 ### Phase 6: Scroll & polish (2–3 days)
 
@@ -2295,9 +2311,9 @@ src/
 │   ├── layout.zig                 ← Constraints, Rect, Size [Phase 1 ✅]
 │   ├── text.zig                   ← Text element, fluent API [Phase 3 ✅]
 │   ├── interaction.zig            ← HitTestList, HitBox, Callback [Phase 4 ✅]
-│   ├── tests.zig                  ← UI unit tests (68 tests) [Phase 1-4 ✅]
-│   ├── entity.zig                 ← EntityPool, Handle(T), EntityId
-│   ├── view.zig                   ← View(T), AnyView
+│   ├── entity.zig                 ← EntityPool, Handle(T), EntityId [Phase 5 ✅]
+│   ├── view.zig                   ← View(T), subscribe/dirty [Phase 5 ✅]
+│   ├── tests.zig                  ← UI unit tests (83 tests) [Phase 1-5 ✅]
 │   ├── theme.zig                  ← Theme, dark/light presets
 │   ├── action.zig                 ← Action union, KeybindingTable
 │   ├── animation.zig              ← Animation, Easing

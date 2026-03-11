@@ -1297,3 +1297,271 @@ test "Nested interactive divs register in painter order" {
     try testing.expect(inner_clicked);
     try testing.expect(!outer_clicked);
 }
+
+// ── EntityPool tests ────────────────────────────────────────────────
+
+const EntityPool = ui.EntityPool;
+const EntityId = ui.EntityId;
+
+test "EntityPool create and read" {
+    var pool = EntityPool.init(testing.allocator);
+    defer pool.deinit();
+
+    const handle = pool.create(i32, 42);
+    try testing.expectEqual(@as(i32, 42), handle.read(&pool).*);
+}
+
+test "EntityPool create multiple types" {
+    var pool = EntityPool.init(testing.allocator);
+    defer pool.deinit();
+
+    const int_h = pool.create(i32, 10);
+    const float_h = pool.create(f32, 3.14);
+
+    try testing.expectEqual(@as(i32, 10), int_h.read(&pool).*);
+    try testing.expectApproxEqAbs(@as(f32, 3.14), float_h.read(&pool).*, 0.01);
+}
+
+test "EntityPool update mutates value" {
+    var pool = EntityPool.init(testing.allocator);
+    defer pool.deinit();
+
+    const handle = pool.create(i32, 0);
+    handle.update(&pool, 99);
+    try testing.expectEqual(@as(i32, 99), handle.read(&pool).*);
+}
+
+test "EntityPool destroy and free list reuse" {
+    var pool = EntityPool.init(testing.allocator);
+    defer pool.deinit();
+
+    const h1 = pool.create(i32, 1);
+    const id1 = h1.id;
+    pool.destroy(h1.id);
+
+    // New allocation should reuse the same slot index
+    const h2 = pool.create(i32, 2);
+    try testing.expectEqual(id1.index, h2.id.index);
+    // But generation should have incremented
+    try testing.expect(h2.id.generation > id1.generation);
+    try testing.expectEqual(@as(i32, 2), h2.read(&pool).*);
+}
+
+test "EntityPool isAlive returns false after destroy" {
+    var pool = EntityPool.init(testing.allocator);
+    defer pool.deinit();
+
+    const handle = pool.create(i32, 42);
+    try testing.expect(pool.isAlive(handle.id));
+    pool.destroy(handle.id);
+    try testing.expect(!pool.isAlive(handle.id));
+}
+
+test "EntityPool struct entity" {
+    const MyState = struct {
+        count: i32,
+        name: []const u8,
+    };
+
+    var pool = EntityPool.init(testing.allocator);
+    defer pool.deinit();
+
+    const handle = pool.create(MyState, .{ .count = 5, .name = "hello" });
+    const state = handle.read(&pool);
+    try testing.expectEqual(@as(i32, 5), state.count);
+    try testing.expectEqualStrings("hello", state.name);
+}
+
+// ── Subscription / Observer tests ───────────────────────────────────
+
+test "EntityPool observe fires on update" {
+    var pool = EntityPool.init(testing.allocator);
+    defer pool.deinit();
+
+    var notified: bool = false;
+    const handle = pool.create(i32, 0);
+    pool.observe(handle.id, @ptrCast(&notified), &struct {
+        fn cb(ctx: ?*anyopaque) void {
+            const ptr: *bool = @ptrCast(@alignCast(ctx.?));
+            ptr.* = true;
+        }
+    }.cb);
+
+    // Update should fire the observer
+    handle.update(&pool, 10);
+    try testing.expect(notified);
+}
+
+test "EntityPool multiple observers all fire" {
+    var pool = EntityPool.init(testing.allocator);
+    defer pool.deinit();
+
+    var count: i32 = 0;
+    const handle = pool.create(i32, 0);
+
+    // Add two observers
+    pool.observe(handle.id, @ptrCast(&count), &struct {
+        fn cb(ctx: ?*anyopaque) void {
+            const ptr: *i32 = @ptrCast(@alignCast(ctx.?));
+            ptr.* += 1;
+        }
+    }.cb);
+    pool.observe(handle.id, @ptrCast(&count), &struct {
+        fn cb(ctx: ?*anyopaque) void {
+            const ptr: *i32 = @ptrCast(@alignCast(ctx.?));
+            ptr.* += 10;
+        }
+    }.cb);
+
+    handle.update(&pool, 5);
+    try testing.expectEqual(@as(i32, 11), count);
+}
+
+test "EntityPool observer not fired without update" {
+    var pool = EntityPool.init(testing.allocator);
+    defer pool.deinit();
+
+    var notified: bool = false;
+    const handle = pool.create(i32, 0);
+    pool.observe(handle.id, @ptrCast(&notified), &struct {
+        fn cb(ctx: ?*anyopaque) void {
+            const ptr: *bool = @ptrCast(@alignCast(ctx.?));
+            ptr.* = true;
+        }
+    }.cb);
+
+    // Just reading should not fire
+    _ = handle.read(&pool);
+    try testing.expect(!notified);
+}
+
+test "EntityPool destroy cleans up subscriptions" {
+    var pool = EntityPool.init(testing.allocator);
+    defer pool.deinit();
+
+    var notified: bool = false;
+    const handle = pool.create(i32, 0);
+    pool.observe(handle.id, @ptrCast(&notified), &struct {
+        fn cb(ctx: ?*anyopaque) void {
+            const ptr: *bool = @ptrCast(@alignCast(ctx.?));
+            ptr.* = true;
+        }
+    }.cb);
+
+    pool.destroy(handle.id);
+    // After destroy, subscription count for this entity should be 0
+    try testing.expectEqual(@as(usize, 0), pool.subscriberCount(handle.id));
+}
+
+// ── Handle typed wrapper tests ──────────────────────────────────────
+
+test "Handle read returns correct typed pointer" {
+    var pool = EntityPool.init(testing.allocator);
+    defer pool.deinit();
+
+    const Counter = struct { val: i32 };
+    const handle = pool.create(Counter, .{ .val = 7 });
+    try testing.expectEqual(@as(i32, 7), handle.read(&pool).val);
+}
+
+test "Handle update with new value and observe" {
+    var pool = EntityPool.init(testing.allocator);
+    defer pool.deinit();
+
+    const Counter = struct { val: i32 };
+    var fired: bool = false;
+
+    const handle = pool.create(Counter, .{ .val = 0 });
+    pool.observe(handle.id, @ptrCast(&fired), &struct {
+        fn cb(ctx: ?*anyopaque) void {
+            const ptr: *bool = @ptrCast(@alignCast(ctx.?));
+            ptr.* = true;
+        }
+    }.cb);
+
+    handle.update(&pool, .{ .val = 42 });
+    try testing.expectEqual(@as(i32, 42), handle.read(&pool).val);
+    try testing.expect(fired);
+}
+
+// ── View system tests ───────────────────────────────────────────────
+
+test "View renders element from model" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var pool = EntityPool.init(testing.allocator);
+    defer pool.deinit();
+
+    const Counter = struct {
+        count: i32,
+
+        pub fn render(self: *const @This(), a: std.mem.Allocator, _: ui.TextMeasurer) ui.Element {
+            _ = self;
+            return ui.div(a).bg(ui.Color.hex(0xFF0000)).size(100, 50).into_element();
+        }
+    };
+
+    const handle = pool.create(Counter, .{ .count = 0 });
+    const view = ui.View(Counter).init(handle);
+
+    // View should produce an element from the model
+    const el = view.render(&pool, alloc, stub_measurer);
+    // Use unconstrained layout so the div reports its intrinsic size
+    const sz = el.doLayout(.{});
+    try testing.expectApproxEqAbs(@as(f32, 100), sz.w, 0.1);
+    try testing.expectApproxEqAbs(@as(f32, 50), sz.h, 0.1);
+}
+
+test "View render reflects updated model" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var pool = EntityPool.init(testing.allocator);
+    defer pool.deinit();
+
+    const Counter = struct {
+        count: i32,
+
+        pub fn render(self: *const @This(), a: std.mem.Allocator, _: ui.TextMeasurer) ui.Element {
+            return ui.div(a).bg(ui.Color.hex(0xFF0000)).size(100, @floatFromInt(self.count)).into_element();
+        }
+    };
+
+    const handle = pool.create(Counter, .{ .count = 50 });
+    const view = ui.View(Counter).init(handle);
+
+    const el1 = view.render(&pool, alloc, stub_measurer);
+    const sz1 = el1.doLayout(.{});
+    try testing.expectApproxEqAbs(@as(f32, 50), sz1.h, 0.1);
+
+    handle.update(&pool, .{ .count = 80 });
+
+    const el2 = view.render(&pool, alloc, stub_measurer);
+    const sz2 = el2.doLayout(.{});
+    try testing.expectApproxEqAbs(@as(f32, 80), sz2.h, 0.1);
+}
+
+test "View subscribe sets dirty flag on update" {
+    var pool = EntityPool.init(testing.allocator);
+    defer pool.deinit();
+
+    const Counter = struct {
+        count: i32,
+        pub fn render(self: *const @This(), a: std.mem.Allocator, _: ui.TextMeasurer) ui.Element {
+            _ = self;
+            return ui.div(a).size(10, 10).into_element();
+        }
+    };
+
+    var dirty: bool = false;
+    const handle = pool.create(Counter, .{ .count = 0 });
+    var view = ui.View(Counter).init(handle);
+    view.subscribe(&pool, &dirty);
+
+    try testing.expect(!dirty);
+    handle.update(&pool, .{ .count = 1 });
+    try testing.expect(dirty);
+}
