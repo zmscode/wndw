@@ -18,6 +18,17 @@ pub const Modifiers = struct {
         return a.shift == b.shift and a.ctrl == b.ctrl and
             a.alt == b.alt and a.super == b.super;
     }
+
+    /// Convert from wndw event Modifiers (which includes caps_lock) to
+    /// UI Modifiers (which ignores caps_lock for keybinding matching).
+    pub fn fromEvent(m: wndw.Modifiers) Modifiers {
+        return .{
+            .shift = m.shift,
+            .ctrl = m.ctrl,
+            .alt = m.alt,
+            .super = m.super,
+        };
+    }
 };
 
 pub const KeyCombo = struct {
